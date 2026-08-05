@@ -1,0 +1,24 @@
+# --- Base Framework & Utilities ---
+numpy>=1.26.0,<2.0.0
+pandas>=2.0.0,<2.3.0
+scipy>=1.10.0
+psutil>=5.9.0
+
+# --- Time Series Decomposition & EMD ---
+statsmodels>=0.14.0
+EMD-signal>=1.6.0
+
+# --- Visualization ---
+matplotlib>=3.7.0
+plotly>=5.15.0
+
+# --- Deep Learning & Moirai Foundation Model ---
+torch>=2.0.0
+gluonts==0.14.4
+uni2ts>=1.0.0
+einops>=0.7.0
+huggingface-hub>=0.20.0
+
+# --- Jupyter Notebook Environment ---
+jupyter>=1.0.0
+ipykernel>=6.20.0
