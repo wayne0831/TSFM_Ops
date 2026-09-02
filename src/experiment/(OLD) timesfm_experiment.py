@@ -15,7 +15,7 @@ from timesfm import TimesFM_2p5_200M_torch, ForecastConfig
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
-from src.util.util import *
+from util.TEMP import *
 from src.model.LoRA import *
 from src.config import *
 from itertools import product
