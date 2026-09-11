@@ -1,16 +1,18 @@
 import numpy as np
 import plotly.graph_objects as go
 import pandas as pd
+from src.config import *
 
-NUM_SAMPLES = 5000
-LENGTH      = 512
+file_path = r'C:\Users\AICT\Desktop\PythonProject\TSFM_Ops\results\data_generation\260908_KernelSynth_Num300_len64.csv'
 
-df_exp_results = pd.read_csv(f'C:/Users/AICT/Desktop/PythonProject/TSFM_Ops/results/data_generation/260904_KernelSynth_Num5000_Len512.csv')
+print(f"Reading experimental results from: {file_path}")
+
+df_exp_results = pd.read_csv(file_path)
 
 # 1. 임곗값(Threshold) 상수 정의
-F_T_thr = 0.64
-F_S_thr = 0.64
-F_I_thr = 0.45
+F_T_thr = PARAMS['TS_STRENGTH']['F_T_thr']
+F_S_thr = PARAMS['TS_STRENGTH']['F_S_thr']
+F_I_thr = PARAMS['TS_STRENGTH']['F_I_thr']
 
 # 축의 전체 렌더링 범위 정의
 axis_min, axis_max = -0.05, 1.05
