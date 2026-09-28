@@ -1,3 +1,5 @@
+# KernelSynth-based synthetic time series generation pipeline
+
 import os
 import time
 import warnings

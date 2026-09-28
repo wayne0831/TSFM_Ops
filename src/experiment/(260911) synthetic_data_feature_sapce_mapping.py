@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from src.config import *
 
+#print(os.getcwd())
+
 NUM_SAMPLES = PARAMS['KernelSynth']['NUM_SAMPLES']
 target_lengths = [64, 128, 256, 512]
 
@@ -48,7 +50,7 @@ metric_labels = {
 fig, axes = plt.subplots(2, 2, figsize=(28, 19))
 axes_flat = axes.flatten()
 
-base_dir = r'C:\Users\AICT\Desktop\PythonProject\TSFM_Ops\results\data_generation'
+base_dir = r'./results/data_generation'
 
 for idx, length in enumerate(target_lengths):
     ax = axes_flat[idx]

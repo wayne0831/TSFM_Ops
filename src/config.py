@@ -12,7 +12,7 @@ import torch
 # set version configurations
 ###########################################################################################################
 
-DATE        = 260908
+DATE        = 260921
 DEVICE      = 'cuda' if torch.cuda.is_available() else 'cpu'
 DATA        = 'Etth1, Etth2, Ettm1, Ettm2, Electricity, Exchange, Solar, Weather'
 TSFM_METHOD = 'TimesFM'
@@ -29,9 +29,10 @@ PARAMS = {
         'NUM_SAMPLES': '300',
         'LENGTH': '512, 256, 128, 64',
     },
-    'TS_STRENGTH': {
+    'STL_EMD': {
+        'LENGTH': '512, 256, 128, 64',
         'F_T_thr': 0.64,
-        'F_S_thr': 0.64,
+        'F_S_thr': 0.4,
         'F_I_thr': 0.45,
     },
     'TimesFM': {
@@ -74,6 +75,9 @@ RES_PATH  = {
     'plot': { # .png
         'TimesFM': f'./results/plot/TimesFM/',
         'LoRA': f'./results/plot/LoRA/',
+    },
+    'stl_emd': { # .csv
+      'RESULT': f'./results/stl_emd/{DATE}_stl_emd_results.csv', 
     },
     'data_generation': { # .csv, .npy
         'KernelSynth': {

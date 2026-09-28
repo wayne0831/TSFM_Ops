@@ -1,3 +1,5 @@
+# calculate time series strength using STL and EMD methods
+
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.seasonal import STL
