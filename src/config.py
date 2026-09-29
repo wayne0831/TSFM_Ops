@@ -12,7 +12,7 @@ import torch
 # set version configurations
 ###########################################################################################################
 
-DATE        = 260921
+DATE        = 260930
 DEVICE      = 'cuda' if torch.cuda.is_available() else 'cpu'
 DATA        = 'Etth1, Etth2, Ettm1, Ettm2, Electricity, Exchange, Solar, Weather'
 TSFM_METHOD = 'TimesFM'

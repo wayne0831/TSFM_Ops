@@ -238,13 +238,13 @@ if __name__ == "__main__":
                 # 1. GP 시계열 샘플링
                 ts, expr = sample_from_case(case, bank, length=length)
                 
-                # 2. Min-Max 정규화
-                ts_scaled = (ts - np.min(ts)) / (np.max(ts) - np.min(ts) + 1e-9)
+                # 2. standard scaling
+                ts_scaled = (ts - np.mean(ts)) / (np.std(ts) + 1e-9)
                 ts_scaled_f32 = ts_scaled.astype(np.float32)
                 ts_list_for_len.append(ts_scaled_f32)
                 
                 # 3. STL-EMD 3차원 분해 지표 산출
-                ft_stl, fs_stl, fr_stl, ft_emd, fs_emd, fi_emd = calculate_time_series_strength(ts_scaled)
+                ft_stl, fs_stl, fr_stl, ft_stl_emd, fs_stl_emd, fi_stl_emd = calculate_time_series_strength(ts_scaled)
                 
                 # 4. 메타데이터 레코드 적재
                 record = {
@@ -259,9 +259,9 @@ if __name__ == "__main__":
                     "F_T_STL": ft_stl,
                     "F_S_STL": fs_stl,
                     "F_R_STL": fr_stl,
-                    "F_T_STL_EMD": ft_emd,
-                    "F_S_STL_EMD": fs_emd,
-                    "F_I_STL_EMD": fi_emd
+                    "F_T_STL_EMD": ft_stl_emd,
+                    "F_S_STL_EMD": fs_stl_emd,
+                    "F_I_STL_EMD": fi_stl_emd
                 }
                 len_records.append(record)
         
