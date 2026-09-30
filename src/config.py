@@ -77,14 +77,15 @@ RES_PATH  = {
         'LoRA': f'./results/plot/LoRA/',
     },
     'stl_emd': { # .csv
-      'RESULT': f'./results/stl_emd/{DATE}_stl_emd_results.csv', 
+      'SynthData': f'./results/stl_emd/{DATE}_SynthData_Num{PARAMS[DATA_GEN_METHOD]["NUM_SAMPLES"]}_STL_EMD.csv',
+      'OpenData':  f'./results/stl_emd/{DATE}_OpenData_STL_EMD.csv', 
     },
     'data_generation': { # .csv, .npy
         'KernelSynth': {
             #'METADATA': f'./results/data_generation/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"]["NUM_SAMPLES"]}_Len{PARAMS["KernelSynth"]["LENGTH"]}.csv',
             #'DATA': f'./results/data_generation/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"]["NUM_SAMPLES"]}_Len{PARAMS["KernelSynth"]["LENGTH"]}.npy',
-            'METADATA': f'./results/data_generation/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"]["NUM_SAMPLES"]}.csv',
-            'DATA': f'./results/data_generation/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"]["NUM_SAMPLES"]}.npy',
+            #'METADATA': f'./results/stl_emd/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"]["NUM_SAMPLES"]}.csv',
+            'Data': f'./results/data_generation/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"]["NUM_SAMPLES"]}.npy',
         }
     },
     'predictions': { # .npy

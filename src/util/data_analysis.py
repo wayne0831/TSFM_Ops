@@ -13,31 +13,62 @@ from scipy.signal import find_peaks
 
 # 프로젝트 내부 모듈 import (사용자 환경)
 from src.config import *
-from src.util.data_analysis import calculate_time_series_strength, estimate_period_fft
-
 warnings.filterwarnings('ignore')
 
 # =====================================================================
 # 1. FFT 기반 동적 주기 추정기
 # =====================================================================
 def estimate_period_fft(series: np.ndarray, default_period: int = 24) -> int:
+    """
+    FFT(고속 푸리에 변환)를 기반으로 시계열 데이터의 가장 지배적인 주기(Dominant Period)를 동적으로 추정
+    
+    선형 추세 및 DC(평균) 성분에 의한 저주파 스펙트럼 왜곡을 사전에 제거한 후, 
+    0Hz를 제외한 최대 진폭 주파수의 역수를 취해 정수형 주기를 산출
+    
+    Args:
+        series (np.ndarray): 분석 대상 1차원 시계열 데이터
+        default_period (int): 유효 주기를 탐색하지 못했을 때 반환할 기본 대체 주기 (기본값: 24)
+        
+    Returns:
+        int: 동적으로 추정된 지배적 주기 (2 <= period <= n // 2 보장)
+    """
+
     n = len(series)
     t = np.arange(n)
+
+    # 1차 다항식(직선) 피팅을 통해 시계열 전반의 선형 경향성 추정
     p = np.polyfit(t, series, 1)
+
+    # 원본 신호에서 선형 추세를 차감하여 기저선을 평탄화 (스펙트럼 누출 및 왜곡 방지)
     detrended = series - np.polyval(p, t)
+
+    # 평균을 0으로 맞추어 주파수 0Hz(DC Component)에 에너지가 집중되는 현상 차단
     detrended = detrended - np.mean(detrended)
-    
+
+    # 실수 입력 신호에 최적화된 rfft 수행
     fft_vals = np.fft.rfft(detrended)
+
+    # 시계열 길이 n에 대응하는 주파수 빈(Frequency Bins) 계산
     frequencies = np.fft.rfftfreq(n)
+
+    # 복소수 계수의 절댓값을 계산하여 각 주파수별 진폭(Magnitude) 산출
     magnitudes = np.abs(fft_vals)
-    
+
+    # 진폭 에너지가 가장 강하게 솟구친 피크 인덱스 추출
     if len(magnitudes) > 1:
         dominant_idx = np.argmax(magnitudes[1:]) + 1 
         dominant_freq = frequencies[dominant_idx]
         if dominant_freq > 0:
+            # 주파수와 주기의 반비례 관계(T = 1 / f)에 따라 정수형 주기로 환산
             period = int(np.round(1.0 / dominant_freq))
+
+            # 물리적 유효 주기 조건 검증:
+            # 1) 최소 주기 2: 나이퀴스트 표본화 정리에 따른 최소 진동 간격
+            # 2) 최대 주기 n // 2: 데이터 길이 내에서 최소 2회 이상의 사이클 완결 보장
             if 2 <= period <= n // 2:
                 return period
+
+    # 주기성이 없는 순수 무작위 잡음이거나 경계 조건을 벗어난 경우 기본값 반환[cite: 3]
     return default_period
 
 # =====================================================================
