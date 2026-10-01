@@ -172,9 +172,15 @@ def calculate_time_series_strength(series: np.ndarray):
         
         # Hyndman 분산 분할 공리 기반 3차원 정밀 강도 산출
         var_R_pure = np.var(R_pure)
-        var_TR_pure = np.var(T + I + R_pure)  # 분모에 I_t를 포함하여 분산 보존 (T + R_stl과 동일)
-        var_SR_pure = np.var(S + I + R_pure)  # 분모에 I_t를 포함하여 분산 보존 (S + R_stl과 동일)
-        var_IR_pure = np.var(I + R_pure)      # R_stl의 총분산과 동일
+
+        # # 260930: R_pure 대신 R_stl (I + R_pure) 적용
+        # var_TR_pure = np.var(T + I + R_pure)  # 분모에 I_t를 포함하여 분산 보존 (T + R_stl과 동일)
+        # var_SR_pure = np.var(S + I + R_pure)  # 분모에 I_t를 포함하여 분산 보존 (S + R_stl과 동일)
+
+        #261001: R_pure 적용
+        var_TR_pure = np.var(T + R_pure)
+        var_SR_pure = np.var(S + R_pure)  
+        var_IR_pure = np.var(I + R_pure)     
         
         F_T_STL_EMD = max(0.0, 1.0 - (var_R_pure / var_TR_pure if var_TR_pure > 0 else 1.0))
         F_S_STL_EMD = max(0.0, 1.0 - (var_R_pure / var_SR_pure if var_SR_pure > 0 else 1.0))
