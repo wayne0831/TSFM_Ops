@@ -130,7 +130,7 @@ def decompose_residual_emd(R_stl: np.ndarray, alpha_level: float = 1.645) -> Tup
         spread = alpha_level * np.sqrt(2.0 * T_k[k] / N)
         upper_bound = -ln_T[k] + offset_C + spread
         
-        if ln_E[k] > upper_bound:
+        if ln_E[k] >= upper_bound:
             k_signal.append(k)  # 상한선을 뚫고 올라온 결정론적 충격/개입 모드
         else:
             k_noise.append(k)   # 백색잡음 가설 범위 내의 확률적 잡음 모드
