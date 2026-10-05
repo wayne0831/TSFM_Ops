@@ -61,20 +61,20 @@ for length in lengths:
             
             # 4. 통합 레코드 적재
             record = {
-                "Case_ID": c_id,
-                "True_Sector": sec,
-                "Pattern": pat,
-                "Length": length,
-                "Num_Kernels": case["Num_Kernels"],
-                "Kernels_Used": str(k_keys),
-                "Operations": str(ops) if ops else "['None']",
-                "Kernel_Expression": expr,
-                "F_T_STL": ft_stl,
-                "F_S_STL": fs_stl,
-                "F_R_STL": fr_stl,
-                "F_T_STL_EMD": ft_stl_emd,
-                "F_S_STL_EMD": fs_stl_emd,
-                "F_I_STL_EMD": fi_stl_emd
+                "case_id": c_id,
+                "true_sector": sec,
+                "pattern": pat,
+                "length": length,
+                "num_kernels": case["Num_Kernels"],
+                "kernels_used": str(k_keys),
+                "operations": str(ops) if ops else "['None']",
+                "kernel_expression": expr,
+                "f_t_stl": ft_stl,
+                "f_s_stl": fs_stl,
+                "f_r_stl": fr_stl,
+                "f_t_stl_emd": ft_stl_emd,
+                "f_s_stl_emd": fs_stl_emd,
+                "f_i_stl_emd": fi_stl_emd
             }
             all_records.append(record)
     

@@ -100,17 +100,17 @@ for data_name in data_list:
             ) = calculate_time_series_strength(norm_window)
 
             records.append({
-                "Data": data_name,
-                "Length": length,
-                'Start_Idx': start_idx,
-                'End_Idx': start_idx + length,
-                "Step_Size": step_size,
-                "F_T_STL": f_t_stl,
-                "F_S_STL": f_s_stl,
-                "F_R_STL": f_r_stl,
-                "F_T_STL_EMD": f_t_stl_emd,
-                "F_S_STL_EMD": f_s_stl_emd,
-                "F_I_STL_EMD": f_i_stl_emd,
+                "data": data_name,
+                "length": length,
+                'start_idx': start_idx,
+                'end_idx': start_idx + length,
+                "step_size": step_size,
+                "f_t_stl": f_t_stl,
+                "f_s_stl": f_s_stl,
+                "f_r_stl": f_r_stl,
+                "f_t_stl_emd": f_t_stl_emd,
+                "f_s_stl_emd": f_s_stl_emd,
+                "f_i_stl_emd": f_i_stl_emd,
             })
 
 end_time = time.time()

@@ -49,18 +49,18 @@ class PeriodicKernel(Kernel):
         diff = np.abs(x1[:, None] - x2[None, :])
         return np.exp(-2.0 * (np.sin(np.pi * diff / self.p) ** 2))
 
-class RationalQuadraticKernel(Kernel):
-    """
-    RQ 커널 수식: (1 + diff^2 / (2 * alpha * l^2))^(-alpha)
-    alpha >= 10 일 때 RBF 커널로 수렴하는 거동을 완벽히 모사
-    """
-    def __init__(self, alpha: float, length_scale: float = 1.0):
-        super().__init__("RQ", {"alpha": alpha, "l": length_scale}, f"RQ(alpha={alpha:g},l={length_scale:g})")
-        self.alpha = alpha
-        self.l = length_scale
-    def __call__(self, x1, x2):
-        dist_sq = (x1[:, None] - x2[None, :]) ** 2
-        return (1.0 + dist_sq / (2.0 * self.alpha * (self.l ** 2))) ** (-self.alpha)
+# class RationalQuadraticKernel(Kernel):
+#     """
+#     RQ 커널 수식: (1 + diff^2 / (2 * alpha * l^2))^(-alpha)
+#     alpha >= 10 일 때 RBF 커널로 수렴하는 거동을 완벽히 모사
+#     """
+#     def __init__(self, alpha: float, length_scale: float = 1.0):
+#         super().__init__("RQ", {"alpha": alpha, "l": length_scale}, f"RQ(alpha={alpha:g},l={length_scale:g})")
+#         self.alpha = alpha
+#         self.l = length_scale
+#     def __call__(self, x1, x2):
+#         dist_sq = (x1[:, None] - x2[None, :]) ** 2
+#         return (1.0 + dist_sq / (2.0 * self.alpha * (self.l ** 2))) ** (-self.alpha)
 
 class WhiteNoiseKernel(Kernel):
     def __init__(self, sigma_n: float):
@@ -74,7 +74,9 @@ class WhiteNoiseKernel(Kernel):
 # 2. 파라미터화된 4대 커널 뱅크 구축 (길이 종속적 주기 필터링)
 # =====================================================================
 def build_kernel_bank(length: int) -> Dict[str, List[Kernel]]:
-    bank = {"LIN": [], "PER": [], "RQ": [], "WN": []}
+    #bank = {"LIN": [], "PER": [], "RQ": [], "WN": []}
+    bank = {"LIN": [], "PER": [], "WN": []}
+
     
     # 1. Linear (추세 기울기 분산 제어)
     for s in [0.0, 1.0, 10.0]:
@@ -91,9 +93,9 @@ def build_kernel_bank(length: int) -> Dict[str, List[Kernel]]:
         bank["PER"].append(PeriodicKernel(period=p))
         
     # 3. Rational Quadratic (쇼크 영역: alpha<=1.0 / RBF 평활 영역: alpha>=10.0)
-    for alpha in [0.1, 0.5, 1.0, 10.0, 50.0]:
-        for l in [0.5, 1.0, 5.0, 10.0]:
-            bank["RQ"].append(RationalQuadraticKernel(alpha=alpha, length_scale=l))
+    # for alpha in [0.1, 0.5, 1.0, 10.0, 50.0]:
+    #     for l in [0.5, 1.0, 5.0, 10.0]:
+    #         bank["RQ"].append(RationalQuadraticKernel(alpha=alpha, length_scale=l))
             
     # 4. White Noise (잔차 노이즈 강도)
     for s_n in [0.1, 0.5, 1.0]:
