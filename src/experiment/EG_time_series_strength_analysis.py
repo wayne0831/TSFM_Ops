@@ -291,6 +291,6 @@ if __name__ == "__main__":
   if os.path.exists(file_path):
     df_synth = pd.read_csv(file_path)
 
-    evaluate_synt_data_ts_strength(df=df_synth, case_id=2, length=512, ts_thr_method="otsu")
+    evaluate_synt_data_ts_strength(df=df_synth, case_id=21, length=512, ts_thr_method="kneedle")
   else:
     print(f"[Warning] 파일을 찾을 수 없습니다: {file_path}")
