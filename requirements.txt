@@ -1,24 +1,50 @@
-# --- Base Framework & Utilities ---
-numpy>=1.26.0,<2.0.0
-pandas>=2.0.0,<2.3.0
-scipy>=1.10.0
-psutil>=5.9.0
+# ====================================================================
+# TSFM_Ops 프로젝트 의존 패키지 목록 (Moirai, TimesFM, Chronos 통합)
+# ====================================================================
 
-# --- Time Series Decomposition & EMD ---
+# 1. 수치 계산 및 데이터 관리
+numpy>=1.26.0,<2.0.0
+pandas>=2.0            # 검증 2.3.3   (CSV 로드)
+scipy>=1.10.0
+pydantic>=1.7
+
+# 2. 시계열 분해 및 신호 분석 (STL / EMD)
 statsmodels>=0.14.0
 EMD-signal>=1.6.0
+pathos>=0.2.1
 
-# --- Visualization ---
-matplotlib>=3.7.0
-plotly>=5.15.0
+# 3. 딥러닝 프레임워크 & JAX 백엔드 (Moirai, TimesFM)
+torch>=2.5             # 검증 2.9.0
+lightning>=2.0.0
+huggingface_hub>=0.30  # 검증 0.36.2  (체크포인트 자동 다운로드)
+safetensors>=0.5       # 검증 0.6.2
+jaxtyping>=0.2.24
+jax[cpu]>=0.4.20
+einops>=0.7.0
+hydra-core==1.3.0
+accelerate>=0.26.0
 
-# --- Deep Learning & Moirai Foundation Model ---
-torch>=2.0.0
+# 4. 시계열 파운데이션 모델(TSFM) 패키지 (Moirai, TimesFM, Chronos)
 gluonts==0.14.4
 uni2ts>=1.0.0
-einops>=0.7.0
-huggingface-hub>=0.20.0
+timesfm>=1.1.0
+chronos-forecasting>=0.1.0
 
-# --- Jupyter Notebook Environment ---
+# 5. PEFT / LoRA 파인튜닝 모듈
+peft>=0.7.0
+
+# 6. 머신러닝, 클러스터링 및 임계값 탐색
+scikit-learn>=1.2.0
+joblib>=1.3.0
+
+# 7. 정적 및 대화형 3D 시각화
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.15.0
+nbformat>=5.7.0
+
+# 8. 주피터 노트북, 프로파일링 및 유틸리티
 jupyter>=1.0.0
 ipykernel>=6.20.0
+psutil>=5.9.0
+tqdm>=4.64.0
