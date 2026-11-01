@@ -105,7 +105,7 @@ def run_timesfm_experiment(data_name, tsfm_method, tr_data, te_data, cl, hl, pat
 
     res_save_dir = _resolve_path(RES_PATH['performance'][tsfm_method])
     os.makedirs(res_save_dir, exist_ok=True)
-    res_file_name = f"{tsfm_method}_performance.csv_{DATE}"
+    res_file_name = f"{tsfm_method}_performance_{DATE}.csv"
     res_csv_save_path = os.path.join(res_save_dir, res_file_name)
 
     res_data = {

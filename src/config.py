@@ -115,7 +115,7 @@ DATASET = {
 
 PIPELINE = {
     'TimesFM':  True,
-    'LoRA':     True,
+    'LoRA':     False,
 }
 
 
