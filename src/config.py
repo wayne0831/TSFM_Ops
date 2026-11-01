@@ -46,7 +46,7 @@ PARAMS = {
         'rank': '4',
         'alpha': '8',
         'dropout': '0.1',
-        'target_modules': '["qkv_proj", "out", "ff0", "ff1"]', # [["qkv_proj", "out"]], ["ff0", "ff1"]]', 
+        'target_modules': '[["qkv_proj", "out", "ff0", "ff1"]]', # [["qkv_proj", "out"]], ["ff0", "ff1"]]', 
         'lr': '1e-3',
         'epochs': '300',
         'batch_size': '64',
