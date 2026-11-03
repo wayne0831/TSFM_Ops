@@ -200,6 +200,16 @@ def calculate_time_series_strength(series: np.ndarray):
 # 시계열 강도 임곗값 알고리즘
 # =============================================================================
 
+def get_static_thresholds():
+    theta_T = float(PARAMS['STL_EMD']['F_T_thr'])
+    theta_S = float(PARAMS['STL_EMD']['F_S_thr'])
+    theta_I = float(PARAMS['STL_EMD']['F_I_thr'])
+
+    return theta_T, theta_S, theta_I
+
+
+get_static_threshold = get_static_thresholds
+
 def get_otsu_threshold(data: np.ndarray, num_bins: int = 101) -> float:
     """
     1) Otsu 알고리즘: 집단 간 분산(Between-Class Variance)을 최대화하는 최적 경계점 탐색

@@ -12,18 +12,19 @@ import torch
 # set version configurations
 ###########################################################################################################
 
-DATE        = 261030
+DATE        = 261103
 DEVICE      = 'cuda' if torch.cuda.is_available() else 'cpu'
 DATA        = 'Etth1, Etth2, Ettm1, Ettm2, Electricity, Exchange, Solar, Weather'
 TSFM_METHOD = 'TimesFM'
 FT_METHOD   = 'LoRA'
+MOE_METHOD  = 'MoE'
 DATA_GEN_METHOD = 'KernelSynth'
 
 ###########################################################################################################
 # set hyperparmeters configurations
 ###########################################################################################################
 
-# name: TimesFM_cl[96]_hl[192]_LoRA_fr[0.7],r[4]_a[16]_d[0.1]_tgt[qkv_proj_out_ff0_ff1]_e[5]_bs[32]
+# name: TimesFM_cl[96]_hl[192]_LoRA_fr[0.7],r[4]_a[16]_d[0.1]_tgt[qkv_proj_out_ff0_ff1]_e[5]_st[64]
 PARAMS = {
     'KernelSynth': {
         'NUM_SAMPLES': '300',
@@ -31,9 +32,9 @@ PARAMS = {
     },
     'STL_EMD': {
         'LENGTH': '512, 256, 128, 64',
-        'F_T_thr': 0.64,
-        'F_S_thr': 0.4,
-        'F_I_thr': 0.45,
+        'F_T_thr': 0.5,
+        'F_S_thr': 0.5,
+        'F_I_thr': 0.5,
     },
     'TimesFM': {
         'version': 'google/timesfm-2.5-200m-pytorch',
@@ -42,14 +43,22 @@ PARAMS = {
         'hl': '64, 128, 256' # '96, 192, 336, 720',   # horizon length
     },
     'FT_RATIO': '0.7',
-    'LoRA': {
-        'rank': '4',
-        'alpha': '8',
-        'dropout': '0.1',
-        'target_modules': '[["qkv_proj", "out", "ff0", "ff1"]]', # [["qkv_proj", "out"]], ["ff0", "ff1"]]', 
-        'lr': '1e-3',
-        'epochs': '300',
-        'batch_size': '64',
+    'PEFT':{
+        'common': {
+            'target_modules': '[["qkv_proj", "out"], ["ff0", "ff1"]]', #, ["qkv_proj", "out", "ff0", "ff1"]]',
+            'lr': '1e-4',
+            'epochs': '50',
+            'stride': '32',
+        },
+        'LoRA': {
+            'rank': '8',
+            'alpha': '16',
+            'dropout': '0.1',
+        }
+    },
+    'MoE': {
+        'decomp_method': 'STL, STL_EMD',        # 'STL': 4개 섹터 (F_T, F_S) / 'STL_EMD': 8개 섹터 (F_T, F_S, F_I)
+        'inference_method': 'single, weighted', # 'single': 속한 섹터 전문가 단독 추론 / 'weighted': F_T, F_S(, F_I) 비례 가중 앙상블
     }
 }
 
@@ -70,11 +79,13 @@ DATA_PATH = {
 }
 CHK_PATH  = {
     'LoRA': f'./checkpoints/LoRA/',
+    'MoE':  f'./checkpoints/MoE/',
 }
 RES_PATH  = {
     'plot': { # .png
         'TimesFM': f'./results/plot/TimesFM/',
         'LoRA': f'./results/plot/LoRA/',
+        'MoE': f'./results/plot/MoE/',
     },
     'stl_emd': { # .csv
       'SynthData': f'./results/stl_emd/{DATE}_SynthData_Num{PARAMS[DATA_GEN_METHOD]["NUM_SAMPLES"]}_STL_EMD.csv',
@@ -91,10 +102,12 @@ RES_PATH  = {
     'predictions': { # .npy
         'TimesFM': f'./results/predictions/TimesFM/',
         'LoRA': f'./results/predictions/LoRA/',
+        'MoE': f'./results/predictions/MoE/',
     },
     'performance': { # .csv
         'TimesFM': f'./results/performance/TimesFM/',
         'LoRA': f'./results/performance/LoRA/',
+        'MoE': f'./results/performance/MoE/',
     },
 }
 
@@ -114,8 +127,9 @@ DATASET = {
 }
 
 PIPELINE = {
-    'TimesFM':  True,
+    'TimesFM':  False,
     'LoRA':     False,
+    'MoE':      True,
 }
 
 

@@ -1,0 +1,4 @@
+data,method,cl,hl,mae,mse,wape,smape,inf_time
+Etth1,TimesFM,512,64,1.7408,5.7295,26.88,38.42,2.3479
+Etth1,TimesFM,512,128,1.9493,6.6499,30.1,41.37,1.2413
+Etth1,TimesFM,512,256,2.2409,8.3807,34.6,51.17,1.4499

@@ -102,3 +102,23 @@ def load_lora(adapters, path):
         A, B = state[k]
         a.A.data.copy_(A.to(a.A.device))
         a.B.data.copy_(B.to(a.B.device))
+
+
+def reset_lora_parameters(adapters):
+    """각 Sector별 LoRA 어댑터를 독립적으로 학습시키기 전에 가중치(A, B)를 초기 상태로 리셋합니다."""
+    for a in adapters.values():
+        nn.init.kaiming_uniform_(a.A, a=math.sqrt(5))
+        nn.init.zeros_(a.B)
+
+
+def get_lora_state(adapters):
+    """현재 장착된 LoRA 어댑터의 가중치(A, B) 사본을 CPU 딕셔너리로 추출합니다."""
+    return {k: (a.A.detach().cpu().clone(), a.B.detach().cpu().clone()) for k, a in adapters.items()}
+
+
+def set_lora_state(adapters, state):
+    """사전 학습된 특정 Sector 전문가의 LoRA 가중치(A, B)를 백본에 온디맨드로 주입(Stitching)합니다."""
+    for k, a in adapters.items():
+        A, B = state[k]
+        a.A.data.copy_(A.to(a.A.device))
+        a.B.data.copy_(B.to(a.B.device))
