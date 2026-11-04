@@ -17,7 +17,8 @@ except ImportError:
 from src.config import *
 
 _peft_common = PARAMS.get('PEFT', {}).get('common', {})
-STRIDE = int(str(_peft_common.get('stride', '64')).split(',')[0].strip())
+BATCH = int(str(_peft_common.get('batch_size', '64')).split(',')[0].strip())
+STRIDE = int(str(_peft_common.get('stride', '32')).split(',')[0].strip())
 
 
 def _lora_peft_parameters(adapters):
@@ -30,7 +31,7 @@ def save_peft_adapter(adapters, path):
                 for k, a in adapters.items()}, path)
 
 
-def train_peft_adapter(model, adapters, X, Y, epochs=500, lr=1e-3, seed=0, log_every=50):
+def train_peft_adapter(model, adapters, X, Y, epochs=100, bs=64, lr=1e-4, seed=0, log_every=50):
     """
     TimesFM 모델에 장착된 LoRA 어댑터(A, B 행렬)만 효율적으로 미세조정(PEFT)하는 훈련 함수입니다.
     
@@ -39,8 +40,9 @@ def train_peft_adapter(model, adapters, X, Y, epochs=500, lr=1e-3, seed=0, log_e
       - adapters: 모델의 선형 레이어(qkv_proj, out 등)에 부착된 LoRA 어댑터 객체 목록
       - X: stride 간격으로 생성된 입력 시계열 컨텍스트 데이터 (NumPy 배열, Shape: [N, cl])
       - Y: 예측 목표치(Ground Truth) 시계열 데이터 (NumPy 배열, Shape: [N, hl])
-      - epochs: 전체 최적화 스텝 수 (기본값: 500)
-      - lr: 학습률 (Learning Rate, 기본값: 1e-3)
+      - epochs: 전체 최적화 스텝 수 (기본값: 100)
+      - bs: 매 스텝마다 무작위로 샘플링할 미니배치 크기 (Batch Size, 기본값: 64)
+      - lr: 학습률 (Learning Rate, 기본값: 1e-4)
       - seed: 재현성을 위한 난수 시드 (기본값: 0)
       - log_every: 손실(Loss)을 터미널에 출력할 주기 (기본값: 50스텝마다 출력)
     """
@@ -55,19 +57,22 @@ def train_peft_adapter(model, adapters, X, Y, epochs=500, lr=1e-3, seed=0, log_e
     # 3. 모델을 학습 모드(Train Mode)로 전환 (Dropout 활성화 등)
     model.train()
     hl = Y.shape[1]
+    eff_bs = min(int(bs), len(X))
 
-    # 4. stride로 생성된 시퀀스 배열을 PyTorch Tensor로 변환 후 연산 장치(DEVICE: cuda/cpu)로 전송
-    cx = torch.from_numpy(X).to(DEVICE)  # Shape: [N, cl] (Context Window)
-    ty = torch.from_numpy(Y).to(DEVICE)  # Shape: [N, hl] (Prediction Horizon Target)
-
-    # 데이터 스케일에 따라 MSE Loss 및 Gradient가 폭발/소실되는 현상을 방지하기 위해
-    # 각 입력 컨텍스트 시퀀스(cx)의 평균(mu)과 표준편차(sigma)로 타깃(ty)을 정규화
-    cx_mean = cx.mean(dim=1, keepdim=True)                      # Shape: [N, 1]
-    cx_std = torch.clamp(cx.std(dim=1, keepdim=True), min=1e-5) # Shape: [N, 1]
-    ty_norm = (ty - cx_mean) / cx_std                           # Shape: [N, hl]
-    
-    # 5. 지정된 epochs만큼 경사하강법 학습 루프 실행
+    # 4. 지정된 epochs만큼 미니배치 샘플링 기반 경사하강법 학습 루프 실행
     for epoch in range(1, epochs + 1):
+        # 5. 미니배치 무작위 샘플링 (Random Sub-sampling):
+        # 전체 학습 윈도우 개수 len(X) 중에서 eff_bs개만큼의 인덱스를 무작위 추출하여 GPU로 전송 (VRAM OOM 방지)
+        idx = torch.randint(0, len(X), (eff_bs,)).numpy()
+        cx = torch.from_numpy(X[idx]).to(DEVICE)  # Shape: [eff_bs, cl] (Context Window)
+        ty = torch.from_numpy(Y[idx]).to(DEVICE)  # Shape: [eff_bs, hl] (Prediction Horizon Target)
+
+        # 데이터 스케일에 따라 MSE Loss 및 Gradient가 폭발/소실되는 현상을 방지하기 위해
+        # 각 입력 컨텍스트 시퀀스(cx)의 평균(mu)과 표준편차(sigma)로 타깃(ty)을 정규화
+        cx_mean = cx.mean(dim=1, keepdim=True)                      # Shape: [eff_bs, 1]
+        cx_std = torch.clamp(cx.std(dim=1, keepdim=True), min=1e-5) # Shape: [eff_bs, 1]
+        ty_norm = (ty - cx_mean) / cx_std                           # Shape: [eff_bs, hl]
+
         # 6. 순전파(Forward Pass) 및 정규화 스케일 손실값(Normalized MSE Loss) 계산:
         # - _predict_horizon(model, cx, hl): ReVIN 역정규화를 거쳐 원래 데이터 스케일의 예측값(pred)을 산출
         # - pred_norm: 타깃(ty_norm)과 동일한 컨텍스트 통계량(cx_mean, cx_std)으로 정규화하여 스케일을 맞춤
@@ -203,9 +208,9 @@ def _predict_horizon(model, ctx_t, hl=None):
 
 def forecast(model, ctx, hl=None):
     """
-    (N, cl) 크기의 시계열 컨텍스트 NumPy 배열을 입력받아,
-    (N, hl) 크기의 최종 포인트 예측 NumPy 배열로 반환합니다.
-    (평가 및 테스트 전용 함수로, 역전파 그래프를 생성하지 않아 VRAM을 절약합니다.)
+    (N, cl) 크기의 테스트 시계열 컨텍스트 전체(ctx)를 입력받아,
+    (N, hl) 크기의 최종 포인트 예측 NumPy 배열을 반환합니다.
+    (평가 및 테스트 전용 함수로, torch.no_grad() 하에서 전체 테스트 시퀀스를 한 번에 예측합니다.)
 
     매개변수:
       - model: 사전학습 백본 또는 LoRA가 결합된 TimesFM 모델 (tsfm.model)

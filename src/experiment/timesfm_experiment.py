@@ -152,6 +152,7 @@ def run_lora_experiment(
     alpha,
     dropout,
     target_modules,
+    batch_size,
     lr,
     epochs,
     stride,
@@ -186,7 +187,8 @@ def run_lora_experiment(
     print(f"Training Windows Created (stride={stride}): X_train={X_train.shape}, Y_train={Y_train.shape}")
 
     # 4. LoRA 어댑터 파인튜닝 (train_peft_adapter: 패치 단위 Welford mu/sg 및 ReVIN 적용)
-    print(f"\n🚀 Training LoRA adapter for {epochs} steps (samples={len(X_train)}, lr={lr})...")
+    eff_bs = min(batch_size, len(X_train))
+    print(f"\n🚀 Training LoRA adapter for {epochs} steps (samples={len(X_train)}, batch_size={eff_bs}, lr={lr})...")
     train_start_time = time.time()
 
     train_peft_adapter(
@@ -195,9 +197,10 @@ def run_lora_experiment(
         X=X_train,
         Y=Y_train,
         epochs=epochs,
+        bs=eff_bs,
         lr=lr,
         seed=0,
-        log_every=max(1, epochs // 6),
+        log_every=max(1, epochs // 5),
     )
 
     total_train_time = time.time() - train_start_time
@@ -214,7 +217,7 @@ def run_lora_experiment(
     os.makedirs(chk_save_dir, exist_ok=True)
     chk_file_name = (
         f"{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_st[{stride}]_{DATE}.pt"
+        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_{DATE}.pt"
     )
     chk_save_path = os.path.join(chk_save_dir, chk_file_name)
     save_peft_adapter(adapters, chk_save_path)
@@ -241,7 +244,7 @@ def run_lora_experiment(
     os.makedirs(pred_save_dir, exist_ok=True)
     pred_file_name = (
         f"{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_st[{stride}]_preds_{DATE}.npy"
+        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_preds_{DATE}.npy"
     )
     pred_npy_save_path = os.path.join(pred_save_dir, pred_file_name)
 
@@ -268,6 +271,7 @@ def run_lora_experiment(
         'target_modules': str(target_modules),
         'lr': lr,
         'epochs': epochs,
+        'batch_size': batch_size,
         'stride': stride,
         'mae': mae,
         'mse': mse,
@@ -308,6 +312,7 @@ def run_timesfm_moe_experiment(
     alpha,
     dropout,
     target_modules,
+    batch_size,
     lr,
     epochs,
     stride,
@@ -360,13 +365,13 @@ def run_timesfm_moe_experiment(
     chk_save_dir = _resolve_path(CHK_PATH.get('MoE', CHK_PATH[ft_method]))
     chk_prefix = (
         f"{tsfm_method}_MoE_[{decomp_method}]_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_st[{stride}]_{DATE}"
+        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_{DATE}"
     )
 
     # 3. [1단계: 전문가 구축] 분해 방식(STL / STL_EMD)에 따른 섹터 분할 및 독립 LoRA 전문가 학습
     print(
         f"\n🚀 [Stage 1] Building MoE Expert Pool "
-        f"(decomp_method={decomp_method}, sectors={num_sectors}, stride={stride})..."
+        f"(decomp_method={decomp_method}, sectors={num_sectors}, stride={stride}, batch_size={batch_size})..."
     )
     train_start_time = time.time()
 
@@ -378,6 +383,7 @@ def run_timesfm_moe_experiment(
         hl=hl,
         decomp_method=decomp_method,
         epochs=epochs,
+        bs=batch_size,
         lr=lr,
         stride=stride,
         chk_dir=chk_save_dir,
@@ -417,7 +423,7 @@ def run_timesfm_moe_experiment(
         os.makedirs(pred_save_dir, exist_ok=True)
         pred_file_name = (
             f"{tsfm_method}_MoE_[{decomp_method}]_{inf_m}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-            f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_st[{stride}]_preds_{DATE}.npy"
+            f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_preds_{DATE}.npy"
         )
         pred_npy_save_path = os.path.join(pred_save_dir, pred_file_name)
 
@@ -448,6 +454,7 @@ def run_timesfm_moe_experiment(
             'target_modules': str(target_modules),
             'lr': lr,
             'epochs': epochs,
+            'batch_size': batch_size,
             'stride': stride,
             'mae': mae,
             'mse': mse,
@@ -502,6 +509,7 @@ if __name__ == "__main__":
     target_modules = peft_common_cfg['target_modules']
     lr = peft_common_cfg['lr']
     epochs = peft_common_cfg['epochs']
+    batch_size = peft_common_cfg['batch_size']
     stride = peft_common_cfg['stride']
 
     rank = peft_method_cfg['rank']
@@ -526,6 +534,7 @@ if __name__ == "__main__":
     alpha_list = [int(x.strip()) for x in alpha.split(',')]
     dropout_list = [float(x.strip()) for x in dropout.split(',')]
     target_modules_list = ast.literal_eval(target_modules)
+    batch_size_list = [int(x.strip()) for x in str(batch_size).split(',')]
     lr_list = [float(x.strip()) for x in lr.split(',')]
     epochs_list = [int(x.strip()) for x in epochs.split(',')]
     stride_list = [int(x.strip()) for x in str(stride).split(',')]
@@ -549,6 +558,7 @@ if __name__ == "__main__":
             alpha_list,
             dropout_list,
             target_modules_list,
+            batch_size_list,
             lr_list,
             epochs_list,
             stride_list,
@@ -571,6 +581,7 @@ if __name__ == "__main__":
             alpha_list,
             dropout_list,
             target_modules_list,
+            batch_size_list,
             lr_list,
             epochs_list,
             stride_list,
@@ -622,6 +633,7 @@ if __name__ == "__main__":
             alpha_item,
             dropout_item,
             target_modules_item,
+            batch_size_item,
             lr_item,
             epochs_item,
             stride_item,
@@ -634,7 +646,7 @@ if __name__ == "__main__":
             )
             print(
                 f"rank: {rank_item}, alpha: {alpha_item}, dropout: {dropout_item}, "
-                f"target_modules: {target_modules_item}, "
+                f"target_modules: {target_modules_item}, batch_size: {batch_size_item}, "
                 f"lr: {lr_item}, epochs: {epochs_item}, stride: {stride_item}"
             )
 
@@ -661,6 +673,7 @@ if __name__ == "__main__":
                 alpha=alpha_item,
                 dropout=dropout_item,
                 target_modules=target_modules_item,
+                batch_size=batch_size_item,
                 lr=lr_item,
                 epochs=epochs_item,
                 stride=stride_item,
@@ -681,6 +694,7 @@ if __name__ == "__main__":
             alpha_item,
             dropout_item,
             target_modules_item,
+            batch_size_item,
             lr_item,
             epochs_item,
             stride_item,
@@ -694,7 +708,7 @@ if __name__ == "__main__":
             )
             print(
                 f"rank: {rank_item}, alpha: {alpha_item}, dropout: {dropout_item}, "
-                f"target_modules: {target_modules_item}, "
+                f"target_modules: {target_modules_item}, batch_size: {batch_size_item}, "
                 f"lr: {lr_item}, epochs: {epochs_item}, stride: {stride_item}"
             )
 
@@ -722,6 +736,7 @@ if __name__ == "__main__":
                 alpha=alpha_item,
                 dropout=dropout_item,
                 target_modules=target_modules_item,
+                batch_size=batch_size_item,
                 lr=lr_item,
                 epochs=epochs_item,
                 stride=stride_item,

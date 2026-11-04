@@ -109,8 +109,9 @@ def build_moe_expert_pool(
     cl: int,
     hl: int,
     decomp_method: str = "STL_EMD",
-    epochs: int = 300,
-    lr: float = 1e-3,
+    epochs: int = 100,
+    bs: int = 64,
+    lr: float = 1e-4,
     stride: int = None,
     chk_dir: str = None,
     chk_prefix: str = None,
@@ -162,8 +163,9 @@ def build_moe_expert_pool(
 
         X_sec = X_train[mask]
         Y_sec = Y_train[mask]
+        eff_bs = min(bs, len(X_sec))
 
-        print(f"\n🔧 Training Expert for Sector [{s_key}] (samples={cnt}, epochs={epochs})...")
+        print(f"\n🔧 Training Expert for Sector [{s_key}] (samples={cnt}, epochs={epochs}, bs={eff_bs})...")
         # 다른 섹터와 그래디언트 간섭이 없도록 LoRA 파라미터(A, B) 초기화 후 독립 학습
         reset_lora_parameters(adapters)
         train_peft_adapter(
@@ -172,6 +174,7 @@ def build_moe_expert_pool(
             X=X_sec,
             Y=Y_sec,
             epochs=epochs,
+            bs=eff_bs,
             lr=lr,
             seed=0,
             log_every=max(1, epochs // 3),
@@ -351,7 +354,7 @@ def forecast_moe_test_series(
         # 해당 섹터 전문가의 LoRA 가중치(A, B)를 백본에 주입(Stitching)
         set_lora_state(adapters, expert_pool[s_key])
 
-        # 해당 섹터가 호출된 시퀀스들에 대해 추론 수행
+        # 해당 섹터가 호출된 전체 시퀀스들에 대해 추론 수행
         active_ctx = ctx_arr[active_win_mask]
         sec_preds = forecast(model, active_ctx, hl=hl)  # Shape: (N_active, hl)
 
