@@ -1,0 +1,10 @@
+data,cl,hl,window_idx,context_start_idx,context_end_idx,pred_start_idx,pred_end_idx,decomp_method,inference_method,F_T,F_S,F_I,theta_T,theta_S,theta_I,assigned_sector,called_expert,expert_weights,target_modules
+exchange,512,256,0,0,512,0,256,STL_EMD,single,0.9808,0.1797,0.7494,0.9796,0.5841,0.4249,HT_LS_HI,HT_LS_HI,{'HT_LS_HI': 1.0},"['ff0', 'ff1']"
+exchange,512,256,1,256,768,256,512,STL_EMD,single,0.9971,0.4922,0.8025,0.9796,0.5841,0.4249,HT_LS_HI,HT_LS_HI,{'HT_LS_HI': 1.0},"['ff0', 'ff1']"
+exchange,512,256,2,512,1024,512,768,STL_EMD,single,0.9974,0.7328,0.9401,0.9796,0.5841,0.4249,HT_HS_HI,HT_HS_HI,{'HT_HS_HI': 1.0},"['ff0', 'ff1']"
+exchange,512,256,3,768,1280,768,1024,STL_EMD,single,0.0484,0.0213,0.0,0.9796,0.5841,0.4249,LT_LS_LI,LT_LS_LI,{'LT_LS_LI': 1.0},"['ff0', 'ff1']"
+exchange,512,256,4,1024,1536,1024,1280,STL_EMD,single,0.9912,0.781,0.9308,0.9796,0.5841,0.4249,HT_HS_HI,HT_HS_HI,{'HT_HS_HI': 1.0},"['ff0', 'ff1']"
+exchange,512,256,5,1280,1792,1280,1536,STL_EMD,single,0.6758,0.4791,0.0,0.9796,0.5841,0.4249,LT_LS_LI,LT_LS_LI,{'LT_LS_LI': 1.0},"['ff0', 'ff1']"
+exchange,512,256,6,1536,2048,1536,1792,STL_EMD,single,0.1669,0.964,0.0,0.9796,0.5841,0.4249,LT_HS_LI,LT_HS_LI,{'LT_HS_LI': 1.0},"['ff0', 'ff1']"
+exchange,512,256,7,1792,2304,1792,2048,STL_EMD,single,0.9688,0.8043,0.0,0.9796,0.5841,0.4249,LT_HS_LI,LT_HS_LI,{'LT_HS_LI': 1.0},"['ff0', 'ff1']"
+exchange,512,256,8,2048,2560,2048,2277,STL_EMD,single,0.9897,0.7468,0.8479,0.9796,0.5841,0.4249,HT_HS_HI,HT_HS_HI,{'HT_HS_HI': 1.0},"['ff0', 'ff1']"

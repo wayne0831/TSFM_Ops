@@ -32,14 +32,17 @@ class LoRALayer(nn.Module):
         self.B = nn.Parameter(torch.empty(out_features, rank, device=device, dtype=dtype), requires_grad=True)
         self.scaling = alpha / rank
         self.dropout = nn.Dropout(p=dropout)
+        self.enabled = True
 
         nn.init.kaiming_uniform_(self.A, a=math.sqrt(5))
         nn.init.zeros_(self.B)
 
     def forward(self, x):
-        result   = self.original_layer(x)
+        result = self.original_layer(x)
+        if not getattr(self, "enabled", True):
+            return result
         lora_out = (self.dropout(x) @ self.A.t() @ self.B.t()) * self.scaling
-        
+
         return result + lora_out
 
 
@@ -109,6 +112,13 @@ def reset_lora_parameters(adapters):
     for a in adapters.values():
         nn.init.kaiming_uniform_(a.A, a=math.sqrt(5))
         nn.init.zeros_(a.B)
+        a.enabled = True
+
+
+def enable_lora(adapters, enabled: bool = True):
+    """LoRA 어댑터 활성/비활성 상태를 전환합니다. (enabled=False이면 순수 TimesFM 백본만 동작)"""
+    for a in adapters.values():
+        a.enabled = enabled
 
 
 def get_lora_state(adapters):
@@ -122,3 +132,4 @@ def set_lora_state(adapters, state):
         A, B = state[k]
         a.A.data.copy_(A.to(a.A.device))
         a.B.data.copy_(B.to(a.B.device))
+        a.enabled = True

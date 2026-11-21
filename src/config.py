@@ -12,9 +12,9 @@ import torch
 # set version configurations
 ###########################################################################################################
 
-DATE        = 261103
+DATE        = 261106
 DEVICE      = 'cuda' if torch.cuda.is_available() else 'cpu'
-DATA        = 'Etth1, Etth2, Ettm1, Ettm2, Electricity, Exchange, Solar, Weather'
+DATA        = 'etth1, etth2, ettm1, ettm2, electricity, exchange, solar, weather'
 TSFM_METHOD = 'TimesFM'
 FT_METHOD   = 'LoRA'
 MOE_METHOD  = 'MoE'
@@ -27,11 +27,11 @@ DATA_GEN_METHOD = 'KernelSynth'
 # name: TimesFM_cl[96]_hl[192]_LoRA_fr[0.7],r[4]_a[16]_d[0.1]_tgt[qkv_proj_out_ff0_ff1]_e[5]_st[64]
 PARAMS = {
     'KernelSynth': {
-        'NUM_SAMPLES': '300',
-        'LENGTH': '512, 256, 128, 64',
+        'num_samples': '300',
+        'length': '512, 256, 128, 64',
     },
     'STL_EMD': {
-        'LENGTH': '512, 256, 128, 64',
+        'length': '512, 256, 128, 64',
         'F_T_thr': 0.5,
         'F_S_thr': 0.5,
         'F_I_thr': 0.5,
@@ -48,7 +48,7 @@ PARAMS = {
             'target_modules': '[["qkv_proj", "out"], ["ff0", "ff1"]]', #, ["qkv_proj", "out", "ff0", "ff1"]]',
             'lr': '1e-4',
             'epochs': '100',
-            'batch_size': '64',
+            'batch_size': '32',
             'stride': '32',
         },
         'LoRA': {
@@ -59,7 +59,8 @@ PARAMS = {
     },
     'MoE': {
         'decomp_method': 'STL, STL_EMD',        # 'STL': 4개 섹터 (F_T, F_S) / 'STL_EMD': 8개 섹터 (F_T, F_S, F_I)
-        'inference_method': 'single, weighted', # 'single': 속한 섹터 전문가 단독 추론 / 'weighted': F_T, F_S(, F_I) 비례 가중 앙상블
+        'inference_method': 'single', #, weighted', # 'single': 속한 섹터 전문가 단독 추론 / 'weighted': F_T, F_S(, F_I) 비례 가중 앙상블
+        'threshold_method': 'median',           # 'median': training set 기준 F_T, F_S, F_I의 q2(중앙값)를 임계치로 사용
     }
 }
 
@@ -69,27 +70,32 @@ PARAMS = {
 
 # data path
 DATA_PATH = {
-    'Etth1':    './data/ETTh1.csv',
-    'Etth2':    './data/ETTh2.csv',
-    'Ettm1':    './data/ETTm1.csv',
-    'Ettm2':    './data/ETTm2.csv',
-    'Electricity':  './data/electricity.csv',
-    'Exchange':     './data/exchange_rate.csv',
-    'Solar':        './data/solar_energy_final.csv',
-    'Weather':      './data/weather.csv',
+    'etth1':    './data/ETTh1.csv',
+    'etth2':    './data/ETTh2.csv',
+    'ettm1':    './data/ETTm1.csv',
+    'ettm2':    './data/ETTm2.csv',
+    'electricity':  './data/electricity.csv',
+    'exchange':     './data/exchange_rate.csv',
+    'solar':        './data/solar_energy_final.csv',
+    'weather':      './data/weather.csv',
 }
 CHK_PATH  = {
     'LoRA': f'./checkpoints/LoRA/',
     'MoE':  f'./checkpoints/MoE/',
 }
 RES_PATH  = {
+    'log': { # .txt
+        'TimesFM': f'./results/log/TimesFM/',
+        'LoRA': f'./results/log/LoRA/',
+        'MoE': f'./results/log/MoE/',
+    },
     'plot': { # .png
         'TimesFM': f'./results/plot/TimesFM/',
         'LoRA': f'./results/plot/LoRA/',
         'MoE': f'./results/plot/MoE/',
     },
     'stl_emd': { # .csv
-      'SynthData': f'./results/stl_emd/{DATE}_SynthData_Num{PARAMS[DATA_GEN_METHOD]["NUM_SAMPLES"]}_STL_EMD.csv',
+      'SynthData': f'./results/stl_emd/{DATE}_SynthData_Num{PARAMS[DATA_GEN_METHOD].get("num_samples", PARAMS[DATA_GEN_METHOD].get("NUM_SAMPLES", "300"))}_STL_EMD.csv',
       'OpenData':  f'./results/stl_emd/{DATE}_OpenData_STL_EMD.csv', 
     },
     'data_generation': { # .csv, .npy
@@ -97,7 +103,7 @@ RES_PATH  = {
             #'METADATA': f'./results/data_generation/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"]["NUM_SAMPLES"]}_Len{PARAMS["KernelSynth"]["LENGTH"]}.csv',
             #'DATA': f'./results/data_generation/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"]["NUM_SAMPLES"]}_Len{PARAMS["KernelSynth"]["LENGTH"]}.npy',
             #'METADATA': f'./results/stl_emd/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"]["NUM_SAMPLES"]}.csv',
-            'Data': f'./results/data_generation/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"]["NUM_SAMPLES"]}.npy',
+            'Data': f'./results/data_generation/{DATE}_KernelSynth_Num{PARAMS["KernelSynth"].get("num_samples", PARAMS["KernelSynth"].get("NUM_SAMPLES", "300"))}.npy',
         }
     },
     'predictions': { # .npy
@@ -117,14 +123,14 @@ RES_PATH  = {
 ###########################################################################################################
 
 DATASET = {
-    'Etth1': {'target_col': 'OT'},
-    'Etth2': {'target_col': 'OT'},
-    'Ettm1': {'target_col': 'OT'},
-    'Ettm2': {'target_col': 'OT'},
-    'Electricity':  {'target_col': 'OT'},
-    'Exchange':     {'target_col': 'SGD'},
-    'Solar':        {'target_col': '136'},
-    'Weather':      {'target_col': 'OT'}
+    'etth1': {'target_col': 'OT'},
+    'etth2': {'target_col': 'OT'},
+    'ettm1': {'target_col': 'OT'},
+    'ettm2': {'target_col': 'OT'},
+    'electricity':  {'target_col': 'OT'},
+    'exchange':     {'target_col': 'SGD'},
+    'solar':        {'target_col': '136'},
+    'weather':      {'target_col': 'OT'}
 }
 
 PIPELINE = {

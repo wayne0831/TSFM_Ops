@@ -200,7 +200,7 @@ def calculate_time_series_strength(series: np.ndarray):
 # 시계열 강도 임곗값 알고리즘
 # =============================================================================
 
-def get_static_thresholds():
+def get_static_threshold():
     theta_T = float(PARAMS['STL_EMD']['F_T_thr'])
     theta_S = float(PARAMS['STL_EMD']['F_S_thr'])
     theta_I = float(PARAMS['STL_EMD']['F_I_thr'])
@@ -208,7 +208,41 @@ def get_static_thresholds():
     return theta_T, theta_S, theta_I
 
 
-get_static_threshold = get_static_thresholds
+# 하위 호환성을 위한 별칭(Alias)
+get_static_thresholds = get_static_threshold
+
+
+def get_median_threshold(data: np.ndarray) -> float:
+    """
+    0) Median (Q2, 중앙값) 알고리즘: 지표 분포의 50% 분위수(q2)를 결정 경계로 도출
+    
+    데이터셋의 Training set 시퀀스들에서 추출된 강도 지표(F_T, F_S, F_I)의
+    중앙값(Q2)을 임계치로 설정하여 Low / High 섹터를 균형 있게 분할합니다.
+    """
+    data = np.asarray(data, dtype=np.float64)
+    data = data[~np.isnan(data)]
+    if len(data) == 0:
+        return 0.5
+    return float(np.quantile(data, 0.5))
+
+
+def calculate_strength_stats(data: np.ndarray) -> Dict[str, float]:
+    """
+    시퀀스별 강도 지표 배열(data)에 대한 사분위수 통계량(min, q1, q2, q3, max) 및 평균(mean)을 산출합니다.
+    """
+    data = np.asarray(data, dtype=np.float64)
+    clean = data[~np.isnan(data)]
+    if len(clean) == 0:
+        return {'min': 0.0, 'q1': 0.0, 'q2': 0.0, 'q3': 0.0, 'max': 0.0, 'mean': 0.0}
+    q_vals = np.quantile(clean, [0.0, 0.25, 0.5, 0.75, 1.0])
+    return {
+        'min': round(float(q_vals[0]), 4),
+        'q1': round(float(q_vals[1]), 4),
+        'q2': round(float(q_vals[2]), 4),
+        'q3': round(float(q_vals[3]), 4),
+        'max': round(float(q_vals[4]), 4),
+        'mean': round(float(np.mean(clean)), 4),
+    }
 
 def get_otsu_threshold(data: np.ndarray, num_bins: int = 101) -> float:
     """
