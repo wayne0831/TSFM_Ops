@@ -31,7 +31,7 @@ def save_peft_adapter(adapters, path):
                 for k, a in adapters.items()}, path)
 
 
-def train_peft_adapter(model, adapters, X, Y, epochs=100, bs=64, lr=1e-4, seed=0, log_every=50):
+def train_peft_adapter(model, adapters, X, Y, epochs=100, bs=64, lr=1e-4, mixup_alpha=0.4, seed=0, log_every=50):
     """
     TimesFM 모델에 장착된 LoRA 어댑터(A, B 행렬)만 효율적으로 미세조정(PEFT)하는 훈련 함수입니다.
     
@@ -43,11 +43,13 @@ def train_peft_adapter(model, adapters, X, Y, epochs=100, bs=64, lr=1e-4, seed=0
       - epochs: 전체 최적화 스텝 수 (기본값: 100)
       - bs: 매 스텝마다 무작위로 샘플링할 미니배치 크기 (Batch Size, 기본값: 64)
       - lr: 학습률 (Learning Rate, 기본값: 1e-4)
+      - mixup_alpha: Dynamic MixUp의 Beta(alpha, alpha) 분포 파라미터 (기본값: 0.4)
       - seed: 재현성을 위한 난수 시드 (기본값: 0)
       - log_every: 손실(Loss)을 터미널에 출력할 주기 (기본값: 50스텝마다 출력)
     """
-    # 1. PyTorch CPU/GPU 연산의 재현성을 위해 시드 고정
+    # 1. PyTorch 및 NumPy 연산의 재현성을 위해 시드 고정
     torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
     
     # 2. 최적화기(Optimizer) 설정:
     # _lora_peft_parameters(adapters)를 통해 백본 가중치는 동결(Freeze)한 채, LoRA 어댑터의 A, B 행렬 파라미터만 Adam 옵티마이저에 전달
@@ -59,7 +61,7 @@ def train_peft_adapter(model, adapters, X, Y, epochs=100, bs=64, lr=1e-4, seed=0
     hl = Y.shape[1]
     eff_bs = min(int(bs), len(X))
 
-    # 4. 지정된 epochs만큼 미니배치 샘플링 기반 경사하강법 학습 루프 실행
+    # 4. 지정된 epochs만큼 미니배치 샘플링 + Dynamic MixUp 기반 경사하강법 학습 루프 실행
     for epoch in range(1, epochs + 1):
         # 5. 미니배치 무작위 샘플링 (Random Sub-sampling):
         # 전체 학습 윈도우 개수 len(X) 중에서 eff_bs개만큼의 인덱스를 무작위 추출하여 GPU로 전송 (VRAM OOM 방지)
@@ -67,18 +69,25 @@ def train_peft_adapter(model, adapters, X, Y, epochs=100, bs=64, lr=1e-4, seed=0
         cx = torch.from_numpy(X[idx]).to(DEVICE)  # Shape: [eff_bs, cl] (Context Window)
         ty = torch.from_numpy(Y[idx]).to(DEVICE)  # Shape: [eff_bs, hl] (Prediction Horizon Target)
 
-        # 데이터 스케일에 따라 MSE Loss 및 Gradient가 폭발/소실되는 현상을 방지하기 위해
-        # 각 입력 컨텍스트 시퀀스(cx)의 평균(mu)과 표준편차(sigma)로 타깃(ty)을 정규화
+        # 데이터 스케일 왜곡 및 Gradient 폭발 방지를 위해 각 컨텍스트 시퀀스의 평균(mu), 표준편차(sigma)로 정규화
         cx_mean = cx.mean(dim=1, keepdim=True)                      # Shape: [eff_bs, 1]
         cx_std = torch.clamp(cx.std(dim=1, keepdim=True), min=1e-5) # Shape: [eff_bs, 1]
+        cx_norm = (cx - cx_mean) / cx_std                           # Shape: [eff_bs, cl]
         ty_norm = (ty - cx_mean) / cx_std                           # Shape: [eff_bs, hl]
 
-        # 6. 순전파(Forward Pass) 및 정규화 스케일 손실값(Normalized MSE Loss) 계산:
-        # - _predict_horizon(model, cx, hl): ReVIN 역정규화를 거쳐 원래 데이터 스케일의 예측값(pred)을 산출
-        # - pred_norm: 타깃(ty_norm)과 동일한 컨텍스트 통계량(cx_mean, cx_std)으로 정규화하여 스케일을 맞춤
-        pred = _predict_horizon(model, cx, hl)
-        pred_norm = (pred - cx_mean) / cx_std
-        loss = torch.mean((pred_norm - ty_norm) ** 2)
+        # 6. Dynamic MixUp 데이터 증강 적용 (배치 샘플이 2개 이상일 때 항상 적용)
+        if eff_bs > 1:
+            lam = float(rng.beta(mixup_alpha, mixup_alpha))
+            perm = torch.randperm(eff_bs, device=DEVICE)
+            cx_in = lam * cx_norm + (1.0 - lam) * cx_norm[perm]
+            ty_target = lam * ty_norm + (1.0 - lam) * ty_norm[perm]
+        else:
+            cx_in = cx_norm
+            ty_target = ty_norm
+
+        # 7. 순전파(Forward Pass) 및 정규화 스케일 손실값(Normalized MSE Loss) 계산
+        pred = _predict_horizon(model, cx_in, hl)
+        loss = torch.mean((pred - ty_target) ** 2)
         
         # 7. 역전파(Backpropagation), 그래디언트 클리핑 및 파라미터 업데이트:
         opt.zero_grad()  # 이전 스텝에서 누적된 기울기(Gradient) 초기화
@@ -275,9 +284,37 @@ def forecast_test_series(model, data, cl, hl):
     return np.concatenate(predictions, axis=0), np.concatenate(actuals, axis=0)
 
 
-def calculate_metrics(actual, pred):
+def calculate_metrics(actual, pred, tr_data=None):
+    """
+    원래 스케일(Raw Scale) 지표(MAE, MSE, WAPE, sMAPE)와 함께
+    iTransformer 등 표준 LTSF 벤치마크 방식(StandardScaler: 학습셋 평균/표준편차 기반 Z-score 정규화)의
+    Scaled MAE, Scaled MSE를 계산하여 반환합니다.
+    """
+    actual = np.asarray(actual, dtype=np.float64)
+    pred = np.asarray(pred, dtype=np.float64)
+
     mae = np.mean(np.abs(actual - pred))
     mse = np.mean((actual - pred) ** 2)
     wape = (np.sum(np.abs(actual - pred)) / (np.sum(np.abs(actual)) + 1e-8)) * 100
     smape = np.mean(np.abs(actual - pred) / ((np.abs(actual) + np.abs(pred)) / 2 + 1e-8)) * 100
-    return round(float(mae), 4), round(float(mse), 4), round(float(wape), 2), round(float(smape), 2)
+
+    # StandardScaler (Z-score 정규화) 기반 Scaled MAE / Scaled MSE 계산
+    ref_data = np.asarray(tr_data, dtype=np.float64) if tr_data is not None else actual
+    ref_mean = float(np.mean(ref_data))
+    ref_std = float(np.std(ref_data))
+    if ref_std < 1e-8:
+        ref_std = 1.0
+
+    actual_scaled = (actual - ref_mean) / ref_std
+    pred_scaled = (pred - ref_mean) / ref_std
+    scaled_mae = np.mean(np.abs(actual_scaled - pred_scaled))
+    scaled_mse = np.mean((actual_scaled - pred_scaled) ** 2)
+
+    return (
+        round(float(mae), 4),
+        round(float(mse), 4),
+        round(float(wape), 2),
+        round(float(smape), 2),
+        round(float(scaled_mae), 4),
+        round(float(scaled_mse), 4),
+    )

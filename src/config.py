@@ -12,7 +12,7 @@ import torch
 # set version configurations
 ###########################################################################################################
 
-DATE        = 261106
+DATE        = 261121
 DEVICE      = 'cuda' if torch.cuda.is_available() else 'cpu'
 DATA        = 'etth1, etth2, ettm1, ettm2, electricity, exchange, solar, weather'
 TSFM_METHOD = 'TimesFM'
@@ -40,12 +40,12 @@ PARAMS = {
         'version': 'google/timesfm-2.5-200m-pytorch',
         'patch_size': '32',          # ver. 1.0: 64 / ver. 2.5: 32 /
         'cl': '512', # '96',                  # context length
-        'hl': '64, 128, 256' # '96, 192, 336, 720',   # horizon length
+        'hl': '96, 192, 336, 720', # '64, 128, 256' # horizon length
     },
     'FT_RATIO': '0.7',
     'PEFT':{
         'common': {
-            'target_modules': '[["qkv_proj", "out"], ["ff0", "ff1"]]', #, ["qkv_proj", "out", "ff0", "ff1"]]',
+            'target_modules': '[["qkv_proj", "out"]]', # ["ff0", "ff1"]], ["qkv_proj", "out", "ff0", "ff1"]]',
             'lr': '1e-4',
             'epochs': '100',
             'batch_size': '32',
@@ -59,7 +59,7 @@ PARAMS = {
     },
     'MoE': {
         'decomp_method': 'STL, STL_EMD',        # 'STL': 4개 섹터 (F_T, F_S) / 'STL_EMD': 8개 섹터 (F_T, F_S, F_I)
-        'inference_method': 'single', #, weighted', # 'single': 속한 섹터 전문가 단독 추론 / 'weighted': F_T, F_S(, F_I) 비례 가중 앙상블
+        'inference_method': 'single, ensemble', # 'single': 속한 섹터 전문가 단독 추론 / 'ensemble': Shared Expert(전체 학습셋) + Domain Expert(속한 섹터) 0.5:0.5 앙상블
         'threshold_method': 'median',           # 'median': training set 기준 F_T, F_S, F_I의 q2(중앙값)를 임계치로 사용
     }
 }
@@ -134,8 +134,8 @@ DATASET = {
 }
 
 PIPELINE = {
-    'TimesFM':  False,
-    'LoRA':     False,
+    'TimesFM':  True,
+    'LoRA':     True,
     'MoE':      True,
 }
 

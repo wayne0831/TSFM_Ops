@@ -35,15 +35,20 @@ from src.model.PEFT.LoRA import (
     get_trainable_params_ratio,
     remove_lora_from_tsfm,
     save_lora,
+    set_lora_state,
 )
 from src.model.PEFT.MoE import (
     build_moe_expert_pool,
-    forecast_moe_test_series,
+    build_test_context_windows,
+    extract_all_strength_matrices,
+    forecast_moe_test_series_multi,
+    get_or_train_shared_expert,
     get_sector_keys,
 )
 from src.model.PEFT.train_forecast import (
     calculate_metrics,
     create_sliding_windows,
+    forecast,
     forecast_test_series,
     save_peft_adapter,
     train_peft_adapter,
@@ -224,7 +229,7 @@ def run_timesfm_experiment(data_name, tsfm_method, tr_data, te_data, cl, hl, pat
     print(f"✅ Predictions saved to: {pred_npy_save_path}")
 
     # 4. 성능 지표 계산 및 결과(.csv) 저장
-    mae, mse, wape, smape = calculate_metrics(base_actuals, base_preds)
+    mae, mse, wape, smape, scaled_mae, scaled_mse = calculate_metrics(base_actuals, base_preds, tr_data=tr_data)
 
     res_data = {
         'data': data_name,
@@ -233,12 +238,17 @@ def run_timesfm_experiment(data_name, tsfm_method, tr_data, te_data, cl, hl, pat
         'hl': hl,
         'mae': mae,
         'mse': mse,
+        'scaled_mae': scaled_mae,
+        'scaled_mse': scaled_mse,
         'wape': wape,
         'smape': smape,
         'inf_time': round(inf_time, 4),
     }
 
-    print(f"Performance Metrics: MAE={mae:.4f}, MSE={mse:.4f}, WAPE={wape:.2f}%, sMAPE={smape:.2f}%")
+    print(
+        f"Performance Metrics: MAE={mae:.4f}, MSE={mse:.4f}, "
+        f"Scaled_MAE={scaled_mae:.4f}, Scaled_MSE={scaled_mse:.4f}, WAPE={wape:.2f}%, sMAPE={smape:.2f}%"
+    )
 
     _save_performance_row(res_csv_save_path, res_data)
     print(f"✅ Performance metrics saved to: {res_csv_save_path}")
@@ -394,7 +404,7 @@ def run_lora_experiment(
     print(f"✅ Predictions saved to: {pred_npy_save_path}")
 
     # 8. 성능 지표 계산 및 결과(.csv) 저장
-    mae, mse, wape, smape = calculate_metrics(lora_actuals, lora_preds)
+    mae, mse, wape, smape, scaled_mae, scaled_mse = calculate_metrics(lora_actuals, lora_preds, tr_data=tr_data)
 
     res_data = {
         'data': data_name,
@@ -412,6 +422,8 @@ def run_lora_experiment(
         'stride': stride,
         'mae': mae,
         'mse': mse,
+        'scaled_mae': scaled_mae,
+        'scaled_mse': scaled_mse,
         'wape': wape,
         'smape': smape,
         'tr_time': round(total_train_time, 4),
@@ -419,7 +431,10 @@ def run_lora_experiment(
         'tr_params_ratio': tr_params_ratio,
     }
 
-    print(f"Performance Metrics: MAE={mae:.4f}, MSE={mse:.4f}, WAPE={wape:.2f}%, sMAPE={smape:.2f}%")
+    print(
+        f"Performance Metrics: MAE={mae:.4f}, MSE={mse:.4f}, "
+        f"Scaled_MAE={scaled_mae:.4f}, Scaled_MSE={scaled_mse:.4f}, WAPE={wape:.2f}%, sMAPE={smape:.2f}%"
+    )
 
     _save_performance_row(res_csv_save_path, res_data)
     print(f"✅ Performance metrics saved to: {res_csv_save_path}")
@@ -451,31 +466,33 @@ def run_timesfm_moe_experiment(
     lr,
     epochs,
     stride,
-    inference_method="single",
+    inference_method="single, ensemble",
     threshold_method=None,
+    strength_cache: Optional[Dict[Any, Any]] = None,
 ):
     """
-    TSFM-MoE 3단계 파이프라인 실험 함수:
-      - 1단계 (Expert Construction): 시계열 분해 방식('STL' -> 4개 섹터 / 'STL_EMD' -> 8개 섹터)과
-        Training set 기준 F_T, F_S[, F_I]의 q2(중앙값, get_median_threshold) 임계치를 기준으로
-        학습 데이터를 분할하고, 각 Sector별 독립 LoRA 어댑터 학습
-      - 2단계 (Expert Gating): 테스트 시퀀스별 실시간 F_T, F_S(, F_I) 산출 및 결정론적 섹터 매핑
-      - 3단계 (Expert Utilization): inference_method('single': 속한 섹터 전문가만 단독 호출, 전문가가 없으면 TSFM 호출 /
-        'weighted': F_T, F_S[, F_I] 비례 가중 앙상블)에 따라 최종 추론 수행
+    TSFM-MoE 통합 3단계 파이프라인 실험 함수 (STL + STL_EMD 및 single + ensemble 통합 실행):
+      - 모델 로드 및 LoRA 구조 장착: 1회
+      - 학습/테스트 시퀀스 STL & STL-EMD 강도(F_T, F_S, F_I) 추출: 1회 (strength_cache 전달 시 target_modules 간에도 재사용)
+      - Shared Expert 학습(또는 기존 LoRA 체크포인트 로드) 및 테스트 추론: 1회 (STL / STL_EMD 양쪽 ensemble에서 공유)
+      - 각 분해 방식(STL: 4섹터 / STL_EMD: 8섹터)별 Domain Expert 학습 및 One-Pass(single + ensemble) 추론 수행
     """
     moe_key = 'MoE' if 'MoE' in RES_PATH['predictions'] else ft_method
-    sector_keys = get_sector_keys(decomp_method)
-    num_sectors = len(sector_keys)
     tgt_name = ", ".join(target_modules)
     if threshold_method is None:
         threshold_method = str(PARAMS.get('MoE', {}).get('threshold_method', 'median')).strip()
     else:
         threshold_method = str(threshold_method).strip()
 
+    if isinstance(decomp_method, str):
+        decomp_methods = [x.strip() for x in decomp_method.split(',') if x.strip()]
+    else:
+        decomp_methods = [str(x).strip() for x in decomp_method if str(x).strip()]
+
     if isinstance(inference_method, str):
         inf_methods = [x.strip() for x in inference_method.split(',') if x.strip()]
     else:
-        inf_methods = list(inference_method)
+        inf_methods = [str(x).strip() for x in inference_method if str(x).strip()]
 
     pred_save_dir = _resolve_path(RES_PATH['predictions'][moe_key])
     os.makedirs(pred_save_dir, exist_ok=True)
@@ -485,50 +502,54 @@ def run_timesfm_moe_experiment(
     res_file_name = f"{tsfm_method}_MoE_performance_{DATE}.csv"
     res_csv_save_path = os.path.join(res_save_dir, res_file_name)
 
-    # 이미 저장된 실험 결과인지 각 inference_method 별로 확인하여 미완료된 항목만 추출
-    pending_inf_methods = []
-    for inf_m in inf_methods:
-        pred_file_name = (
-            f"{tsfm_method}_MoE_[{decomp_method}]_{inf_m}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-            f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_preds_{DATE}.npy"
-        )
-        pred_npy_save_path = os.path.join(pred_save_dir, pred_file_name)
-        if _is_experiment_completed(
-            res_csv_path=res_csv_save_path,
-            pred_npy_path=pred_npy_save_path,
-            match_criteria={
-                'data': data_name,
-                'method': f"{tsfm_method}-MoE",
-                'decomp_method': decomp_method,
-                'inference_method': inf_m,
-                'cl': cl,
-                'hl': hl,
-                'ft_method': ft_method,
-                'rank': rank,
-                'alpha': alpha,
-                'dropout': dropout,
-                'target_modules': str(target_modules),
-                'lr': lr,
-                'epochs': epochs,
-                'batch_size': batch_size,
-                'stride': stride,
-            },
-        ):
-            print(
-                f"⏭️ [Skip] MoE ({decomp_method}, {inf_m}) experiment already completed for {data_name} "
-                f"(cl={cl}, hl={hl}, tgt={target_modules}). Passing..."
+    # 이미 저장된 실험 결과인지 (decomp_method, inference_method) 별로 확인하여 미완료 항목만 추출
+    pending_by_decomp: Dict[str, List[str]] = {}
+    for dm in decomp_methods:
+        pending_infs = []
+        for inf_m in inf_methods:
+            pred_file_name = (
+                f"{tsfm_method}_MoE_[{dm}]_{inf_m}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
+                f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_preds_{DATE}.npy"
             )
-        else:
-            pending_inf_methods.append(inf_m)
+            pred_npy_save_path = os.path.join(pred_save_dir, pred_file_name)
+            if _is_experiment_completed(
+                res_csv_path=res_csv_save_path,
+                pred_npy_path=pred_npy_save_path,
+                match_criteria={
+                    'data': data_name,
+                    'method': f"{tsfm_method}-MoE",
+                    'decomp_method': dm,
+                    'inference_method': inf_m,
+                    'cl': cl,
+                    'hl': hl,
+                    'ft_method': ft_method,
+                    'rank': rank,
+                    'alpha': alpha,
+                    'dropout': dropout,
+                    'target_modules': str(target_modules),
+                    'lr': lr,
+                    'epochs': epochs,
+                    'batch_size': batch_size,
+                    'stride': stride,
+                },
+            ):
+                print(
+                    f"⏭️ [Skip] MoE ({dm}, {inf_m}) experiment already completed for {data_name} "
+                    f"(cl={cl}, hl={hl}, tgt={target_modules}). Passing..."
+                )
+            else:
+                pending_infs.append(inf_m)
+        if pending_infs:
+            pending_by_decomp[dm] = pending_infs
 
-    if not pending_inf_methods:
+    if not pending_by_decomp:
         return
 
-    # 1. TimesFM 모델 로드
+    # 1. TimesFM 모델 로드 (STL / STL_EMD 공용으로 1회만 로드)
     model_ver = PARAMS[tsfm_method]['version']
     print(
-        f"Loading TimesFM for TSFM-MoE (decomp={decomp_method}, threshold_method={threshold_method}, "
-        f"{num_sectors} Sectors): {model_ver}..."
+        f"Loading TimesFM for TSFM-MoE (decomps={list(pending_by_decomp.keys())}, "
+        f"threshold_method={threshold_method}): {model_ver}..."
     )
     tsfm = TimesFM_2p5_200M_torch.from_pretrained(model_ver)
     tsfm_config = ForecastConfig(
@@ -540,7 +561,7 @@ def run_timesfm_moe_experiment(
     tsfm.compile(tsfm_config)
     tsfm.model.to(DEVICE)
 
-    # 2. TimesFM 백본에 LoRA 구조 장착
+    # 2. TimesFM 백본에 LoRA 구조 장착 (1회)
     print("Applying LoRA structure to TimesFM backbone...")
     adapters = apply_lora_to_tsfm(
         model=tsfm.model,
@@ -552,180 +573,272 @@ def run_timesfm_moe_experiment(
     tsfm.model.to(DEVICE)
     tr_params_ratio = get_trainable_params_ratio(tsfm.model)
 
+    # 3. 학습/테스트 윈도우 생성 및 STL + STL_EMD 물리적 강도(F_T, F_S, F_I) 1회 통합 추출 (캐시 활용)
+    X_train, Y_train = create_sliding_windows(tr_data, cl=cl, hl=hl, stride=stride)
+    test_windows = build_test_context_windows(te_data, cl=cl, hl=hl)
+    ctx_arr = test_windows[0]
+
+    train_cache_key = ("train", data_name, len(tr_data), cl, hl, stride)
+    test_cache_key = ("test", data_name, len(tr_data), len(te_data), cl, hl)
+
+    if strength_cache is not None and train_cache_key in strength_cache:
+        train_strengths_all = strength_cache[train_cache_key]
+        print(f"♻️ [Cache Hit] Reusing precomputed train STL & STL_EMD strengths ({len(X_train)} windows).")
+    else:
+        print(f"🔎 [Unified Decomposition] Computing STL & STL_EMD strengths for {len(X_train)} training sequences (once)...")
+        train_strengths_all = extract_all_strength_matrices(X_train)
+        if strength_cache is not None:
+            strength_cache[train_cache_key] = train_strengths_all
+
+    if strength_cache is not None and test_cache_key in strength_cache:
+        test_strengths_all = strength_cache[test_cache_key]
+        print(f"♻️ [Cache Hit] Reusing precomputed test STL & STL_EMD strengths ({len(ctx_arr)} windows).")
+    else:
+        print(f"🔎 [Unified Decomposition] Computing STL & STL_EMD strengths for {len(ctx_arr)} test sequences (once)...")
+        test_strengths_all = extract_all_strength_matrices(ctx_arr)
+        if strength_cache is not None:
+            strength_cache[test_cache_key] = test_strengths_all
+
+    # 4. Shared Expert 확보 및 테스트 추론 (ensemble이 하나라도 있으면 STL / STL_EMD 공용으로 1회만 수행)
     chk_save_dir = _resolve_path(CHK_PATH.get('MoE', CHK_PATH[ft_method]))
-    chk_prefix = (
-        f"{tsfm_method}_MoE_[{decomp_method}]_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_{DATE}"
+    lora_chk_dir = _resolve_path(CHK_PATH[ft_method])
+    shared_chk_file_name = (
+        f"{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
+        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_{DATE}.pt"
     )
+    shared_chk_path = os.path.join(lora_chk_dir, shared_chk_file_name)
 
-    # 3. [1단계: 전문가 구축] Training set의 q2(median) 임계치 기반 섹터 분할 및 독립 LoRA 전문가 학습
-    print(
-        f"\n🚀 [Stage 1] Building MoE Expert Pool "
-        f"(decomp_method={decomp_method}, threshold_method={threshold_method}, sectors={num_sectors}, stride={stride}, batch_size={batch_size})..."
+    need_shared_expert = any(
+        m.strip().lower() == "ensemble"
+        for inf_list in pending_by_decomp.values()
+        for m in inf_list
     )
-    train_start_time = time.time()
+    shared_expert = None
+    shared_pred_windows = None
+    shared_train_time = 0.0
+    shared_inf_time = 0.0
 
-    expert_pool, train_sector_counts, thresholds, train_strength_stats = build_moe_expert_pool(
-        model=tsfm.model,
-        adapters=adapters,
-        tr_data=tr_data,
-        cl=cl,
-        hl=hl,
-        decomp_method=decomp_method,
-        epochs=epochs,
-        bs=batch_size,
-        lr=lr,
-        stride=stride,
-        chk_dir=chk_save_dir,
-        chk_prefix=chk_prefix,
-        threshold_method=threshold_method,
-    )
+    if need_shared_expert:
+        sh_tr_start = time.time()
+        shared_expert = get_or_train_shared_expert(
+            model=tsfm.model,
+            adapters=adapters,
+            X_train=X_train,
+            Y_train=Y_train,
+            epochs=epochs,
+            bs=batch_size,
+            lr=lr,
+            shared_chk_path=shared_chk_path,
+        )
+        shared_train_time = time.time() - sh_tr_start
 
-    total_train_time = time.time() - train_start_time
-    num_trained_experts = len(expert_pool)
-    print("\n" + "=" * 50)
-    print(f"✅ [Stage 1] Expert Pool Construction Completed! ({num_trained_experts}/{num_sectors} active experts)")
-    print(f"Total MoE Training Time: {total_train_time:.2f}s")
-    print("=" * 50)
+        if shared_expert is not None:
+            sh_inf_start = time.time()
+            set_lora_state(adapters, shared_expert)
+            shared_pred_windows = forecast(tsfm.model, ctx_arr, hl=hl)
+            shared_inf_time = time.time() - sh_inf_start
+            print(f"🌐 Shared Expert Test Inference Completed (reused across STL/STL_EMD): {shared_inf_time:.2f}s")
 
-    # 4. [2단계 & 3단계: 각 미완료 inference_method에 대해 추론 및 저장]
-    for inf_m in pending_inf_methods:
-        print(f"\nPredicting with TimesFM-MoE (decomp_method={decomp_method}, inference_method={inf_m})...")
+    # 5. 각 분해 방식(STL, STL_EMD)별로 섹터 Domain Expert 학습 + One-Pass(single & ensemble) 추론 수행
+    for dm, pending_inf_methods in pending_by_decomp.items():
+        dm_norm = dm.strip().upper().replace('-', '_')
+        sector_keys = get_sector_keys(dm)
+        num_sectors = len(sector_keys)
+        chk_prefix = (
+            f"{tsfm_method}_MoE_[{dm}]_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
+            f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_{DATE}"
+        )
+
+        print(
+            f"\n🚀 [Stage 1] Building MoE Domain Expert Pool "
+            f"(decomp_method={dm}, threshold_method={threshold_method}, sectors={num_sectors}, "
+            f"stride={stride}, batch_size={batch_size})..."
+        )
+        train_start_time = time.time()
+
+        expert_pool, train_sector_counts, thresholds, train_strength_stats, _ = build_moe_expert_pool(
+            model=tsfm.model,
+            adapters=adapters,
+            tr_data=tr_data,
+            cl=cl,
+            hl=hl,
+            decomp_method=dm,
+            epochs=epochs,
+            bs=batch_size,
+            lr=lr,
+            stride=stride,
+            chk_dir=chk_save_dir,
+            chk_prefix=chk_prefix,
+            threshold_method=threshold_method,
+            train_shared_expert=False,
+            precomputed_windows=(X_train, Y_train),
+            precomputed_train_strengths=train_strengths_all[dm_norm],
+            shared_expert_override=shared_expert,
+        )
+
+        dm_has_ensemble = any(m.strip().lower() == "ensemble" for m in pending_inf_methods)
+        total_train_time = (time.time() - train_start_time) + (shared_train_time if dm_has_ensemble else 0.0)
+        num_trained_experts = len(expert_pool)
+        print("\n" + "=" * 50)
+        print(
+            f"✅ [Stage 1] ({dm}) Expert Pool Construction Completed! "
+            f"({num_trained_experts}/{num_sectors} domain experts, shared_expert={'ready' if shared_expert is not None else 'none'})"
+        )
+        print(f"Total MoE ({dm}) Training Time: {total_train_time:.2f}s")
+        print("=" * 50)
+
+        # One-Pass 통합 추론 (사전 계산된 test_strengths 및 shared_pred_windows 재사용)
+        print(
+            f"\nPredicting with TimesFM-MoE (One-Pass: decomp_method={dm}, "
+            f"inference_methods={pending_inf_methods})..."
+        )
         start_inf_time = time.time()
 
-        moe_preds, moe_actuals, test_sector_counts, test_strength_stats, test_context_df = forecast_moe_test_series(
+        preds_by_method, moe_actuals, test_sector_counts, test_strength_stats, ctx_dfs_by_method = forecast_moe_test_series_multi(
             model=tsfm.model,
             adapters=adapters,
             expert_pool=expert_pool,
             data=te_data,
             cl=cl,
             hl=hl,
-            decomp_method=decomp_method,
-            inference_method=inf_m,
+            decomp_method=dm,
+            inference_methods=pending_inf_methods,
             thresholds=thresholds,
             tsfm_name=tsfm_method,
+            shared_expert=shared_expert,
+            precomputed_test_windows=test_windows,
+            precomputed_test_strengths=test_strengths_all[dm_norm],
+            precomputed_shared_preds=shared_pred_windows,
         )
 
-        inf_time = time.time() - start_inf_time
-        print(f"# of predictions: {len(moe_preds)}, # of actuals: {len(moe_actuals)}")
-        print(f"Predictions (first 5): {moe_preds[:5]}, Actuals (first 5): {moe_actuals[:5]}")
-        print(f"TimesFM-MoE ({inf_m}) Inference Time: {inf_time:.2f}s")
+        inf_time = (time.time() - start_inf_time) + (shared_inf_time if dm_has_ensemble else 0.0)
+        print(f"TimesFM-MoE ({dm}) One-Pass Inference Time ({pending_inf_methods}): {inf_time:.2f}s")
 
-        # 5. 예측 결과(.npy) 및 테스트 컨텍스트별 F_T, F_S, F_I + 호출된 expert 정보(.csv) 저장
-        base_exp_tag = (
-            f"{tsfm_method}_MoE_[{decomp_method}]_{inf_m}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-            f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]"
-        )
-        pred_file_name = f"{base_exp_tag}_preds_{DATE}.npy"
-        pred_npy_save_path = os.path.join(pred_save_dir, pred_file_name)
+        for inf_m in pending_inf_methods:
+            inf_m_key = inf_m.strip().lower()
+            moe_preds = preds_by_method[inf_m_key]
+            test_context_df = ctx_dfs_by_method[inf_m_key]
 
-        np.save(pred_npy_save_path, moe_preds)
-        print(f"✅ MoE Predictions saved to: {pred_npy_save_path}")
+            print(f"\n--- Saving Results for TimesFM-MoE (decomp_method={dm}, inference_method={inf_m}) ---")
+            print(f"# of predictions: {len(moe_preds)}, # of actuals: {len(moe_actuals)}")
+            print(f"Predictions (first 5): {moe_preds[:5]}, Actuals (first 5): {moe_actuals[:5]}")
 
-        # 테스트 컨텍스트별 F_T, F_S, F_I 및 호출 expert 상세 정보 저장
-        test_context_df.insert(0, 'data', data_name)
-        test_context_df.insert(1, 'cl', cl)
-        test_context_df.insert(2, 'hl', hl)
-        test_context_df['target_modules'] = str(target_modules)
+            # 예측 결과(.npy) 및 테스트 컨텍스트별 F_T, F_S, F_I + 호출된 expert 정보(.csv) 저장
+            base_exp_tag = (
+                f"{tsfm_method}_MoE_[{dm}]_{inf_m}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
+                f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]"
+            )
+            pred_file_name = f"{base_exp_tag}_preds_{DATE}.npy"
+            pred_npy_save_path = os.path.join(pred_save_dir, pred_file_name)
 
-        ctx_csv_file_name = f"{base_exp_tag}_context_experts_{DATE}.csv"
-        ctx_csv_save_path = os.path.join(pred_save_dir, ctx_csv_file_name)
-        test_context_df.to_csv(ctx_csv_save_path, index=False)
-        print(f"✅ MoE Test Context F_T/F_S/F_I & Called Experts saved to: {ctx_csv_save_path}")
+            np.save(pred_npy_save_path, moe_preds)
+            print(f"✅ MoE Predictions saved to: {pred_npy_save_path}")
 
-        # 통합 테스트 컨텍스트 로그 CSV에도 누적 저장 (results/performance/MoE/)
-        all_ctx_csv_path = os.path.join(res_save_dir, f"{tsfm_method}_MoE_test_context_experts_{DATE}.csv")
-        all_ctx_exists = os.path.isfile(all_ctx_csv_path)
-        test_context_df.to_csv(all_ctx_csv_path, mode='a', header=not all_ctx_exists, index=False)
+            test_context_df.insert(0, 'data', data_name)
+            test_context_df.insert(1, 'cl', cl)
+            test_context_df.insert(2, 'hl', hl)
+            test_context_df['target_modules'] = str(target_modules)
 
-        # 6. 성능 지표 및 시퀀스별 F_T, F_S, F_I 통계량(min, q1, q2, q3, max, mean) 결과(.csv) 저장
-        mae, mse, wape, smape = calculate_metrics(moe_actuals, moe_preds)
+            ctx_csv_file_name = f"{base_exp_tag}_context_experts_{DATE}.csv"
+            ctx_csv_save_path = os.path.join(pred_save_dir, ctx_csv_file_name)
+            test_context_df.to_csv(ctx_csv_save_path, index=False)
+            print(f"✅ MoE Test Context F_T/F_S/F_I & Called Experts saved to: {ctx_csv_save_path}")
 
-        tr_ft = train_strength_stats.get('F_T')
-        tr_fs = train_strength_stats.get('F_S')
-        tr_fi = train_strength_stats.get('F_I')
-        te_ft = test_strength_stats.get('F_T')
-        te_fs = test_strength_stats.get('F_S')
-        te_fi = test_strength_stats.get('F_I')
+            all_ctx_csv_path = os.path.join(res_save_dir, f"{tsfm_method}_MoE_test_context_experts_{DATE}.csv")
+            all_ctx_exists = os.path.isfile(all_ctx_csv_path)
+            test_context_df.to_csv(all_ctx_csv_path, mode='a', header=not all_ctx_exists, index=False)
 
-        res_data = {
-            'data': data_name,
-            'method': f"{tsfm_method}-MoE",
-            'decomp_method': decomp_method,
-            'threshold_method': threshold_method,
-            'inference_method': inf_m,
-            'num_sectors': num_sectors,
-            'active_experts': num_trained_experts,
-            'cl': cl,
-            'hl': hl,
-            'ft_method': ft_method,
-            'rank': rank,
-            'alpha': alpha,
-            'dropout': dropout,
-            'target_modules': str(target_modules),
-            'lr': lr,
-            'epochs': epochs,
-            'batch_size': batch_size,
-            'stride': stride,
-            'mae': mae,
-            'mse': mse,
-            'wape': wape,
-            'smape': smape,
-            'tr_time': round(total_train_time, 4),
-            'inf_time': round(inf_time, 4),
-            'tr_params_ratio': tr_params_ratio,
-            'thresholds': str(thresholds),
-            'train_sector_counts': str(train_sector_counts),
-            'test_sector_counts': str(test_sector_counts),
-            # Training set 시퀀스별 F_T, F_S, F_I 통계량(min, q1, q2, q3, max) 및 평균(mean)
-            'train_F_T_min': _format_strength_stats(tr_ft, 'min'),
-            'train_F_T_q1': _format_strength_stats(tr_ft, 'q1'),
-            'train_F_T_q2': _format_strength_stats(tr_ft, 'q2'),
-            'train_F_T_q3': _format_strength_stats(tr_ft, 'q3'),
-            'train_F_T_max': _format_strength_stats(tr_ft, 'max'),
-            'train_F_T_mean': _format_strength_stats(tr_ft, 'mean'),
-            'train_F_S_min': _format_strength_stats(tr_fs, 'min'),
-            'train_F_S_q1': _format_strength_stats(tr_fs, 'q1'),
-            'train_F_S_q2': _format_strength_stats(tr_fs, 'q2'),
-            'train_F_S_q3': _format_strength_stats(tr_fs, 'q3'),
-            'train_F_S_max': _format_strength_stats(tr_fs, 'max'),
-            'train_F_S_mean': _format_strength_stats(tr_fs, 'mean'),
-            'train_F_I_min': _format_strength_stats(tr_fi, 'min'),
-            'train_F_I_q1': _format_strength_stats(tr_fi, 'q1'),
-            'train_F_I_q2': _format_strength_stats(tr_fi, 'q2'),
-            'train_F_I_q3': _format_strength_stats(tr_fi, 'q3'),
-            'train_F_I_max': _format_strength_stats(tr_fi, 'max'),
-            'train_F_I_mean': _format_strength_stats(tr_fi, 'mean'),
-            # Test set 시퀀스별 F_T, F_S, F_I 통계량(min, q1, q2, q3, max) 및 평균(mean)
-            'test_F_T_min': _format_strength_stats(te_ft, 'min'),
-            'test_F_T_q1': _format_strength_stats(te_ft, 'q1'),
-            'test_F_T_q2': _format_strength_stats(te_ft, 'q2'),
-            'test_F_T_q3': _format_strength_stats(te_ft, 'q3'),
-            'test_F_T_max': _format_strength_stats(te_ft, 'max'),
-            'test_F_T_mean': _format_strength_stats(te_ft, 'mean'),
-            'test_F_S_min': _format_strength_stats(te_fs, 'min'),
-            'test_F_S_q1': _format_strength_stats(te_fs, 'q1'),
-            'test_F_S_q2': _format_strength_stats(te_fs, 'q2'),
-            'test_F_S_q3': _format_strength_stats(te_fs, 'q3'),
-            'test_F_S_max': _format_strength_stats(te_fs, 'max'),
-            'test_F_S_mean': _format_strength_stats(te_fs, 'mean'),
-            'test_F_I_min': _format_strength_stats(te_fi, 'min'),
-            'test_F_I_q1': _format_strength_stats(te_fi, 'q1'),
-            'test_F_I_q2': _format_strength_stats(te_fi, 'q2'),
-            'test_F_I_q3': _format_strength_stats(te_fi, 'q3'),
-            'test_F_I_max': _format_strength_stats(te_fi, 'max'),
-            'test_F_I_mean': _format_strength_stats(te_fi, 'mean'),
-        }
+            # 성능 지표 및 시퀀스별 F_T, F_S, F_I 통계량 결과(.csv) 저장
+            mae, mse, wape, smape, scaled_mae, scaled_mse = calculate_metrics(moe_actuals, moe_preds, tr_data=tr_data)
 
-        print(
-            f"Performance Metrics (MoE-{decomp_method}-{inf_m}): "
-            f"MAE={mae:.4f}, MSE={mse:.4f}, WAPE={wape:.2f}%, sMAPE={smape:.2f}%"
-        )
+            tr_ft = train_strength_stats.get('F_T')
+            tr_fs = train_strength_stats.get('F_S')
+            tr_fi = train_strength_stats.get('F_I')
+            te_ft = test_strength_stats.get('F_T')
+            te_fs = test_strength_stats.get('F_S')
+            te_fi = test_strength_stats.get('F_I')
 
-        _save_performance_row(res_csv_save_path, res_data)
-        print(f"✅ MoE Performance metrics saved to: {res_csv_save_path}")
+            res_data = {
+                'data': data_name,
+                'method': f"{tsfm_method}-MoE",
+                'decomp_method': dm,
+                'threshold_method': threshold_method,
+                'inference_method': inf_m,
+                'num_sectors': num_sectors,
+                'active_experts': num_trained_experts,
+                'cl': cl,
+                'hl': hl,
+                'ft_method': ft_method,
+                'rank': rank,
+                'alpha': alpha,
+                'dropout': dropout,
+                'target_modules': str(target_modules),
+                'lr': lr,
+                'epochs': epochs,
+                'batch_size': batch_size,
+                'stride': stride,
+                'mae': mae,
+                'mse': mse,
+                'scaled_mae': scaled_mae,
+                'scaled_mse': scaled_mse,
+                'wape': wape,
+                'smape': smape,
+                'tr_time': round(total_train_time, 4),
+                'inf_time': round(inf_time, 4),
+                'tr_params_ratio': tr_params_ratio,
+                'thresholds': str(thresholds),
+                'train_sector_counts': str(train_sector_counts),
+                'test_sector_counts': str(test_sector_counts),
+                # Training set 시퀀스별 F_T, F_S, F_I 통계량(min, q1, q2, q3, max) 및 평균(mean)
+                'train_F_T_min': _format_strength_stats(tr_ft, 'min'),
+                'train_F_T_q1': _format_strength_stats(tr_ft, 'q1'),
+                'train_F_T_q2': _format_strength_stats(tr_ft, 'q2'),
+                'train_F_T_q3': _format_strength_stats(tr_ft, 'q3'),
+                'train_F_T_max': _format_strength_stats(tr_ft, 'max'),
+                'train_F_T_mean': _format_strength_stats(tr_ft, 'mean'),
+                'train_F_S_min': _format_strength_stats(tr_fs, 'min'),
+                'train_F_S_q1': _format_strength_stats(tr_fs, 'q1'),
+                'train_F_S_q2': _format_strength_stats(tr_fs, 'q2'),
+                'train_F_S_q3': _format_strength_stats(tr_fs, 'q3'),
+                'train_F_S_max': _format_strength_stats(tr_fs, 'max'),
+                'train_F_S_mean': _format_strength_stats(tr_fs, 'mean'),
+                'train_F_I_min': _format_strength_stats(tr_fi, 'min'),
+                'train_F_I_q1': _format_strength_stats(tr_fi, 'q1'),
+                'train_F_I_q2': _format_strength_stats(tr_fi, 'q2'),
+                'train_F_I_q3': _format_strength_stats(tr_fi, 'q3'),
+                'train_F_I_max': _format_strength_stats(tr_fi, 'max'),
+                'train_F_I_mean': _format_strength_stats(tr_fi, 'mean'),
+                # Test set 시퀀스별 F_T, F_S, F_I 통계량(min, q1, q2, q3, max) 및 평균(mean)
+                'test_F_T_min': _format_strength_stats(te_ft, 'min'),
+                'test_F_T_q1': _format_strength_stats(te_ft, 'q1'),
+                'test_F_T_q2': _format_strength_stats(te_ft, 'q2'),
+                'test_F_T_q3': _format_strength_stats(te_ft, 'q3'),
+                'test_F_T_max': _format_strength_stats(te_ft, 'max'),
+                'test_F_T_mean': _format_strength_stats(te_ft, 'mean'),
+                'test_F_S_min': _format_strength_stats(te_fs, 'min'),
+                'test_F_S_q1': _format_strength_stats(te_fs, 'q1'),
+                'test_F_S_q2': _format_strength_stats(te_fs, 'q2'),
+                'test_F_S_q3': _format_strength_stats(te_fs, 'q3'),
+                'test_F_S_max': _format_strength_stats(te_fs, 'max'),
+                'test_F_S_mean': _format_strength_stats(te_fs, 'mean'),
+                'test_F_I_min': _format_strength_stats(te_fi, 'min'),
+                'test_F_I_q1': _format_strength_stats(te_fi, 'q1'),
+                'test_F_I_q2': _format_strength_stats(te_fi, 'q2'),
+                'test_F_I_q3': _format_strength_stats(te_fi, 'q3'),
+                'test_F_I_max': _format_strength_stats(te_fi, 'max'),
+                'test_F_I_mean': _format_strength_stats(te_fi, 'mean'),
+            }
 
-    # 7. 메모리 해제 및 모델 구조 원복
+            print(
+                f"Performance Metrics (MoE-{dm}-{inf_m}): "
+                f"MAE={mae:.4f}, MSE={mse:.4f}, Scaled_MAE={scaled_mae:.4f}, Scaled_MSE={scaled_mse:.4f}, "
+                f"WAPE={wape:.2f}%, sMAPE={smape:.2f}%"
+            )
+
+            _save_performance_row(res_csv_save_path, res_data)
+            print(f"✅ MoE Performance metrics saved to: {res_csv_save_path}")
+
+    # 6. 메모리 해제 및 모델 구조 원복 (1회)
     print("🔄 Reverting model structure and clearing cache...")
     tsfm.model = remove_lora_from_tsfm(tsfm.model)
     del tsfm
@@ -787,7 +900,7 @@ if __name__ == "__main__":
         # MoE 설정 로드
         moe_cfg = PARAMS.get('MoE', {})
         decomp_method_str = str(moe_cfg.get('decomp_method', 'STL, STL_EMD'))
-        inference_method_str = str(moe_cfg.get('inference_method', 'single, weighted'))
+        inference_method_str = str(moe_cfg.get('inference_method', 'single, ensemble'))
         threshold_method_str = str(moe_cfg.get('threshold_method', 'median')).strip()
 
         # 실험 조합 생성용 리스트 변환
@@ -835,13 +948,12 @@ if __name__ == "__main__":
         )
         num_lora_comb = len(lora_comb)
 
-        # 3. TimesFM-MoE (STL: 4 Sectors / STL_EMD: 8 Sectors) 실험 조합
+        # 3. TimesFM-MoE (STL + STL_EMD 통합 실행 조합: decomp_method는 내부에서 한 번에 처리하여 STL/EMD 및 모델 로드 중복 제거)
         moe_comb = list(
             product(
                 data_name_list,
                 tsfm_method_list,
                 ft_method_list,
-                decomp_method_list,
                 patch_size_list,
                 ft_ratio_list,
                 cl_list,
@@ -948,13 +1060,13 @@ if __name__ == "__main__":
                     stride=stride_item,
                 )
 
-        # (3) TimesFM-MoE (STL: 4 Sectors / STL_EMD: 8 Sectors) 실험 실행
+        # (3) TimesFM-MoE (STL: 4 Sectors & STL_EMD: 8 Sectors 통합 실행)
         if PIPELINE.get('MoE', False):
+            moe_strength_cache: Dict[Any, Any] = {}
             for idx, (
                 dn_item,
                 tm_item,
                 ft_item,
-                dm_item,
                 ps_item,
                 fr_item,
                 cl_item,
@@ -969,10 +1081,14 @@ if __name__ == "__main__":
                 stride_item,
             ) in enumerate(moe_comb, 1):
                 print("\n" + "=" * 60)
-                print(f"[TimesFM-MoE ({dm_item}, threshold={threshold_method_str})] Experiment [{idx} / {num_moe_comb}]")
+                print(
+                    f"[TimesFM-MoE ({decomp_method_str}, threshold={threshold_method_str})] "
+                    f"Experiment [{idx} / {num_moe_comb}]"
+                )
                 print(
                     f"data_name: {dn_item}, tsfm_method: {tm_item}, ft_method: {ft_item}, "
-                    f"decomp_method: {dm_item}, threshold_method: {threshold_method_str}, inference_method: {inference_method_str}, "
+                    f"decomp_method: {decomp_method_str}, threshold_method: {threshold_method_str}, "
+                    f"inference_method: {inference_method_str}, "
                     f"patch_size: {ps_item}, ft_ratio: {fr_item}, cl: {cl_item}, hl: {hl_item}"
                 )
                 print(
@@ -995,7 +1111,7 @@ if __name__ == "__main__":
                     data_name=dn_item,
                     tsfm_method=tm_item,
                     ft_method=ft_item,
-                    decomp_method=dm_item,
+                    decomp_method=decomp_method_list,
                     tr_data=tr_data,
                     te_data=te_data,
                     cl=cl_item,
@@ -1011,6 +1127,7 @@ if __name__ == "__main__":
                     stride=stride_item,
                     inference_method=inference_method_str,
                     threshold_method=threshold_method_str,
+                    strength_cache=moe_strength_cache,
                 )
     finally:
         sys.stdout = tee_logger.terminal
