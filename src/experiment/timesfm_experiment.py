@@ -173,12 +173,12 @@ def _format_strength_stats(stats_dict: Optional[Dict[str, float]], key: str) -> 
 def run_timesfm_experiment(data_name, tsfm_method, tr_data, te_data, cl, hl, patch_size):
     pred_save_dir = _resolve_path(RES_PATH['predictions'][tsfm_method])
     os.makedirs(pred_save_dir, exist_ok=True)
-    pred_file_name = f"{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_preds_{DATE}.npy"
+    pred_file_name = f"{DATE}_{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_preds.npy"
     pred_npy_save_path = os.path.join(pred_save_dir, pred_file_name)
 
     res_save_dir = _resolve_path(RES_PATH['performance'][tsfm_method])
     os.makedirs(res_save_dir, exist_ok=True)
-    res_file_name = f"{tsfm_method}_performance_{DATE}.csv"
+    res_file_name = f"{DATE}_{tsfm_method}_performance.csv"
     res_csv_save_path = os.path.join(res_save_dir, res_file_name)
 
     # 이미 저장된 실험 결과이면 pass
@@ -282,14 +282,14 @@ def run_lora_experiment(
     pred_save_dir = _resolve_path(RES_PATH['predictions'][ft_method])
     os.makedirs(pred_save_dir, exist_ok=True)
     pred_file_name = (
-        f"{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_preds_{DATE}.npy"
+        f"{DATE}_{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
+        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_preds.npy"
     )
     pred_npy_save_path = os.path.join(pred_save_dir, pred_file_name)
 
     res_save_dir = _resolve_path(RES_PATH['performance'][ft_method])
     os.makedirs(res_save_dir, exist_ok=True)
-    res_file_name = f"{tsfm_method}_{ft_method}_performance_{DATE}.csv"
+    res_file_name = f"{DATE}_{tsfm_method}_{ft_method}_performance.csv"
     res_csv_save_path = os.path.join(res_save_dir, res_file_name)
 
     # 이미 저장된 실험 결과이면 pass
@@ -376,8 +376,8 @@ def run_lora_experiment(
     chk_save_dir = _resolve_path(CHK_PATH[ft_method])
     os.makedirs(chk_save_dir, exist_ok=True)
     chk_file_name = (
-        f"{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_{DATE}.pt"
+        f"{DATE}_{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
+        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}].pt"
     )
     chk_save_path = os.path.join(chk_save_dir, chk_file_name)
     save_peft_adapter(adapters, chk_save_path)
@@ -499,7 +499,7 @@ def run_timesfm_moe_experiment(
 
     res_save_dir = _resolve_path(RES_PATH['performance'][moe_key])
     os.makedirs(res_save_dir, exist_ok=True)
-    res_file_name = f"{tsfm_method}_MoE_performance_{DATE}.csv"
+    res_file_name = f"{DATE}_{tsfm_method}_MoE_performance.csv"
     res_csv_save_path = os.path.join(res_save_dir, res_file_name)
 
     # 이미 저장된 실험 결과인지 (decomp_method, inference_method) 별로 확인하여 미완료 항목만 추출
@@ -508,8 +508,8 @@ def run_timesfm_moe_experiment(
         pending_infs = []
         for inf_m in inf_methods:
             pred_file_name = (
-                f"{tsfm_method}_MoE_[{dm}]_{inf_m}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-                f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_preds_{DATE}.npy"
+                f"{DATE}_{tsfm_method}_MoE_[{dm}]_{inf_m}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
+                f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_preds.npy"
             )
             pred_npy_save_path = os.path.join(pred_save_dir, pred_file_name)
             if _is_experiment_completed(
@@ -603,8 +603,8 @@ def run_timesfm_moe_experiment(
     chk_save_dir = _resolve_path(CHK_PATH.get('MoE', CHK_PATH[ft_method]))
     lora_chk_dir = _resolve_path(CHK_PATH[ft_method])
     shared_chk_file_name = (
-        f"{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_{DATE}.pt"
+        f"{DATE}_{tsfm_method}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
+        f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}].pt"
     )
     shared_chk_path = os.path.join(lora_chk_dir, shared_chk_file_name)
 
@@ -645,8 +645,8 @@ def run_timesfm_moe_experiment(
         sector_keys = get_sector_keys(dm)
         num_sectors = len(sector_keys)
         chk_prefix = (
-            f"{tsfm_method}_MoE_[{dm}]_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
-            f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]_{DATE}"
+            f"{DATE}_{tsfm_method}_MoE_[{dm}]_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
+            f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]"
         )
 
         print(
@@ -725,10 +725,10 @@ def run_timesfm_moe_experiment(
 
             # 예측 결과(.npy) 및 테스트 컨텍스트별 F_T, F_S, F_I + 호출된 expert 정보(.csv) 저장
             base_exp_tag = (
-                f"{tsfm_method}_MoE_[{dm}]_{inf_m}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
+                f"{DATE}_{tsfm_method}_MoE_[{dm}]_{inf_m}_{data_name}_cl[{cl}]_hl[{hl}]_{ft_method}_"
                 f"r[{rank}]_a[{alpha}]_d[{dropout}]_tgt_[{tgt_name}]_lr[{lr}]_e[{epochs}]_bs[{batch_size}]_st[{stride}]"
             )
-            pred_file_name = f"{base_exp_tag}_preds_{DATE}.npy"
+            pred_file_name = f"{base_exp_tag}_preds.npy"
             pred_npy_save_path = os.path.join(pred_save_dir, pred_file_name)
 
             np.save(pred_npy_save_path, moe_preds)
@@ -739,12 +739,12 @@ def run_timesfm_moe_experiment(
             test_context_df.insert(2, 'hl', hl)
             test_context_df['target_modules'] = str(target_modules)
 
-            ctx_csv_file_name = f"{base_exp_tag}_context_experts_{DATE}.csv"
+            ctx_csv_file_name = f"{base_exp_tag}_context_experts.csv"
             ctx_csv_save_path = os.path.join(pred_save_dir, ctx_csv_file_name)
             test_context_df.to_csv(ctx_csv_save_path, index=False)
             print(f"✅ MoE Test Context F_T/F_S/F_I & Called Experts saved to: {ctx_csv_save_path}")
 
-            all_ctx_csv_path = os.path.join(res_save_dir, f"{tsfm_method}_MoE_test_context_experts_{DATE}.csv")
+            all_ctx_csv_path = os.path.join(res_save_dir, f"{DATE}_{tsfm_method}_MoE_test_context_experts.csv")
             all_ctx_exists = os.path.isfile(all_ctx_csv_path)
             test_context_df.to_csv(all_ctx_csv_path, mode='a', header=not all_ctx_exists, index=False)
 
@@ -848,19 +848,23 @@ def run_timesfm_moe_experiment(
 
 
 if __name__ == "__main__":
+    tsfm_method = TSFM_METHOD
+    pipeline_cfg = PIPELINE.get(tsfm_method, {})
+
     # 실험 로그(.txt) 저장 설정 (results/log 폴더)
     log_base_dir = _resolve_path("./results/log/")
     os.makedirs(log_base_dir, exist_ok=True)
-    main_log_path = os.path.join(log_base_dir, f"{TSFM_METHOD}_experiment_log_{DATE}.txt")
+    main_log_path = os.path.join(log_base_dir, f"{DATE}_{tsfm_method}_experiment_log.txt")
 
-    active_pipelines = [k for k, v in PIPELINE.items() if v]
+    active_stages = [stage for stage, enabled in pipeline_cfg.items() if enabled]
     method_log_paths = []
     if 'log' in RES_PATH and isinstance(RES_PATH['log'], dict):
-        for m_key in active_pipelines:
-            if m_key in RES_PATH['log']:
-                m_dir = _resolve_path(RES_PATH['log'][m_key])
-                os.makedirs(m_dir, exist_ok=True)
-                method_log_paths.append(os.path.join(m_dir, f"{TSFM_METHOD}_{m_key}_log_{DATE}.txt"))
+        for stage_key in active_stages:
+            dir_key = tsfm_method if stage_key == 'Base' else stage_key
+            log_dir_rel = RES_PATH['log'].get(dir_key, f"./results/log/{dir_key}/")
+            m_dir = _resolve_path(log_dir_rel)
+            os.makedirs(m_dir, exist_ok=True)
+            method_log_paths.append(os.path.join(m_dir, f"{DATE}_{tsfm_method}_{stage_key}_log.txt"))
 
     tee_logger = TeeLogger(main_log_path, *method_log_paths)
     sys.stdout = tee_logger
@@ -875,11 +879,11 @@ if __name__ == "__main__":
         # 공통 설정 로드
         data_name = DATA
 
-        # TSFM 설정 로드
-        tsfm_method = TSFM_METHOD
-        patch_size = PARAMS[tsfm_method]['patch_size']
-        cl = PARAMS[tsfm_method]['cl']
-        hl = PARAMS[tsfm_method]['hl']
+        # TimesFM 설정 로드
+        tsfm_cfg = PARAMS[tsfm_method]
+        patch_size = tsfm_cfg['patch_size']
+        cl = tsfm_cfg['cl']
+        hl = tsfm_cfg['hl']
 
         # Fine-Tuning (PEFT common & LoRA) 설정 로드
         ft_method = FT_METHOD
@@ -887,7 +891,7 @@ if __name__ == "__main__":
         peft_common_cfg = PARAMS['PEFT']['common']
         peft_method_cfg = PARAMS['PEFT'][ft_method]
 
-        target_modules = peft_common_cfg['target_modules']
+        target_modules = tsfm_cfg.get('target_modules', peft_common_cfg['target_modules'])
         lr = peft_common_cfg['lr']
         epochs = peft_common_cfg['epochs']
         batch_size = peft_common_cfg['batch_size']
@@ -970,8 +974,8 @@ if __name__ == "__main__":
         )
         num_moe_comb = len(moe_comb)
 
-        # (1) TimesFM 단독 예측 실행
-        if PIPELINE.get('TimesFM', False):
+        # (1) TimesFM 단독(Base) 예측 실행
+        if pipeline_cfg.get('Base', False):
             for idx, (dn_item, tm_item, ps_item, fr_item, cl_item, hl_item) in enumerate(tsfm_comb, 1):
                 print("\n" + "=" * 60)
                 print(f"[TimesFM Standalone] Experiment [{idx} / {num_tsfm_comb}]")
@@ -1001,7 +1005,7 @@ if __name__ == "__main__":
                 )
 
         # (2) TimesFM + LoRA 단일 어댑터 결합 예측 실행
-        if PIPELINE.get('LoRA', False):
+        if pipeline_cfg.get('LoRA', False):
             for idx, (
                 dn_item,
                 tm_item,
@@ -1061,7 +1065,7 @@ if __name__ == "__main__":
                 )
 
         # (3) TimesFM-MoE (STL: 4 Sectors & STL_EMD: 8 Sectors 통합 실행)
-        if PIPELINE.get('MoE', False):
+        if pipeline_cfg.get('MoE', False):
             moe_strength_cache: Dict[Any, Any] = {}
             for idx, (
                 dn_item,

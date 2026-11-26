@@ -1,0 +1,5 @@
+data,cl,hl,window_idx,context_start_idx,context_end_idx,pred_start_idx,pred_end_idx,decomp_method,inference_method,F_T,F_S,F_I,theta_T,theta_S,theta_I,assigned_sector,called_expert,expert_weights,target_modules
+exchange,512,720,0,0,512,0,720,STL,ensemble,0.9267,0.0,,0.9613,0.4373,,LT_LS,ensemble(SHARED+LT_LS),"{'SHARED': 0.5, 'LT_LS': 0.5}","['qkv_proj', 'out']"
+exchange,512,720,1,720,1232,720,1440,STL,ensemble,0.9615,0.9925,,0.9613,0.4373,,HT_HS,ensemble(SHARED+HT_HS),"{'SHARED': 0.5, 'HT_HS': 0.5}","['qkv_proj', 'out']"
+exchange,512,720,2,1440,1952,1440,2160,STL,ensemble,0.3177,0.9968,,0.9613,0.4373,,LT_HS,ensemble(SHARED+LT_HS),"{'SHARED': 0.5, 'LT_HS': 0.5}","['qkv_proj', 'out']"
+exchange,512,720,3,2160,2672,2160,2277,STL,ensemble,0.9418,0.1318,,0.9613,0.4373,,LT_LS,ensemble(SHARED+LT_LS),"{'SHARED': 0.5, 'LT_LS': 0.5}","['qkv_proj', 'out']"

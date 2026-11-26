@@ -1,0 +1,8 @@
+decomp_method,sample_bucket,num_test_windows,mean_train_n,mean_LoRA_MAE,mean_Single_MAE,mean_Ensemble_MAE,mean_delta_Single_vs_LoRA,mean_delta_Ensemble_vs_LoRA,single_win_rate_vs_LoRA_%,ensemble_win_rate_vs_LoRA_%
+STL,2) 11~30 (Sparse),14,29.1,0.4466,0.5282,0.4835,0.0816,0.0369,35.7,35.7
+STL,3) 31~100 (Moderate),259,70.8,0.3163,0.3165,0.3112,0.0002,-0.0051,47.5,52.9
+STL,4) 101+ (Abundant),1623,335.5,0.1971,0.2027,0.1981,0.0056,0.001,45.7,49.8
+STL_EMD,1) 0~10 (Ultra-Sparse),18,5.7,0.3316,0.3488,0.3335,0.0172,0.002,33.3,50.0
+STL_EMD,2) 11~30 (Sparse),103,22.7,0.3176,0.3236,0.3158,0.006,-0.0019,45.6,50.5
+STL_EMD,3) 31~100 (Moderate),301,53.1,0.168,0.1793,0.1697,0.0113,0.0017,37.5,45.8
+STL_EMD,4) 101+ (Abundant),1474,290.2,0.2163,0.2233,0.2175,0.007,0.0012,44.2,47.8

@@ -12,10 +12,10 @@ import torch
 # set version configurations
 ###########################################################################################################
 
-DATE        = 261121
+DATE        = 261122
 DEVICE      = 'cuda' if torch.cuda.is_available() else 'cpu'
 DATA        = 'etth1, etth2, ettm1, ettm2, electricity, exchange, solar, weather'
-TSFM_METHOD = 'TimesFM'
+TSFM_METHOD = 'Moirai' # TimesFM, Chronos, Moirai
 FT_METHOD   = 'LoRA'
 MOE_METHOD  = 'MoE'
 DATA_GEN_METHOD = 'KernelSynth'
@@ -41,6 +41,21 @@ PARAMS = {
         'patch_size': '32',          # ver. 1.0: 64 / ver. 2.5: 32 /
         'cl': '512', # '96',                  # context length
         'hl': '96, 192, 336, 720', # '64, 128, 256' # horizon length
+        'target_modules': '[["qkv_proj", "out"]]', # Attention: ["qkv_proj", "out"] / FFN: ["ff0", "ff1"]
+    },
+    'Chronos': {
+        'version': 'amazon/chronos-2',
+        'patch_size': '16',          # Chronos-2 input/output patch size: 16
+        'cl': '512',                 # context length (up to 8192)
+        'hl': '96, 192, 336, 720',   # horizon length
+        'target_modules': '[["q", "k", "v", "o"]]', # Attention: ["q", "k", "v", "o"] / FFN: ["wi", "wo"]
+    },
+    'Moirai': {
+        'version': 'Salesforce/moirai-2.0-R-small',
+        'patch_size': '16',          # Moirai-2.0 patch size: 16 (num_predict_token=4)
+        'cl': '512',                 # context length
+        'hl': '96, 192, 336, 720',   # horizon length
+        'target_modules': '[["q_proj", "k_proj", "v_proj", "out_proj"]]', # Attention: ["q_proj", "k_proj", "v_proj", "out_proj"] / FFN: ["fc1", "fc_gate", "fc2"]
     },
     'FT_RATIO': '0.7',
     'PEFT':{
@@ -86,11 +101,15 @@ CHK_PATH  = {
 RES_PATH  = {
     'log': { # .txt
         'TimesFM': f'./results/log/TimesFM/',
+        'Chronos': f'./results/log/Chronos/',
+        'Moirai': f'./results/log/Moirai/',
         'LoRA': f'./results/log/LoRA/',
         'MoE': f'./results/log/MoE/',
     },
     'plot': { # .png
         'TimesFM': f'./results/plot/TimesFM/',
+        'Chronos': f'./results/plot/Chronos/',
+        'Moirai': f'./results/plot/Moirai/',
         'LoRA': f'./results/plot/LoRA/',
         'MoE': f'./results/plot/MoE/',
     },
@@ -108,11 +127,15 @@ RES_PATH  = {
     },
     'predictions': { # .npy
         'TimesFM': f'./results/predictions/TimesFM/',
+        'Chronos': f'./results/predictions/Chronos/',
+        'Moirai': f'./results/predictions/Moirai/',
         'LoRA': f'./results/predictions/LoRA/',
         'MoE': f'./results/predictions/MoE/',
     },
     'performance': { # .csv
         'TimesFM': f'./results/performance/TimesFM/',
+        'Chronos': f'./results/performance/Chronos/',
+        'Moirai': f'./results/performance/Moirai/',
         'LoRA': f'./results/performance/LoRA/',
         'MoE': f'./results/performance/MoE/',
     },
@@ -134,9 +157,21 @@ DATASET = {
 }
 
 PIPELINE = {
-    'TimesFM':  True,
-    'LoRA':     True,
-    'MoE':      True,
+    'TimesFM':  {
+        'Base':  True,
+        'LoRA':  True,
+        'MoE':   True,
+    },
+    'Chronos': {
+        'Base':  True,
+        'LoRA':  True,
+        'MoE':   True,
+    },
+    'Moirai': {
+        'Base':  True,
+        'LoRA':  True,
+        'MoE':   True,
+    }
 }
 
 

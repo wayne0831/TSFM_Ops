@@ -1,0 +1,8 @@
+data,cl,hl,window_idx,context_start_idx,context_end_idx,pred_start_idx,pred_end_idx,decomp_method,inference_method,F_T,F_S,F_I,theta_T,theta_S,theta_I,assigned_sector,called_expert,expert_weights,target_modules
+exchange,512,336,0,0,512,0,336,STL,ensemble,0.9267,0.0,,0.9637,0.342,,LT_LS,ensemble(SHARED+LT_LS),"{'SHARED': 0.5, 'LT_LS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+exchange,512,336,1,336,848,336,672,STL,ensemble,0.9957,0.9499,,0.9637,0.342,,HT_HS,ensemble(SHARED+HT_HS),"{'SHARED': 0.5, 'HT_HS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+exchange,512,336,2,672,1184,672,1008,STL,ensemble,0.8793,0.0,,0.9637,0.342,,LT_LS,ensemble(SHARED+LT_LS),"{'SHARED': 0.5, 'LT_LS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+exchange,512,336,3,1008,1520,1008,1344,STL,ensemble,0.9078,0.0288,,0.9637,0.342,,LT_LS,ensemble(SHARED+LT_LS),"{'SHARED': 0.5, 'LT_LS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+exchange,512,336,4,1344,1856,1344,1680,STL,ensemble,0.5201,0.6451,,0.9637,0.342,,LT_HS,ensemble(SHARED+LT_HS),"{'SHARED': 0.5, 'LT_HS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+exchange,512,336,5,1680,2192,1680,2016,STL,ensemble,0.985,0.0649,,0.9637,0.342,,HT_LS,ensemble(SHARED+HT_LS),"{'SHARED': 0.5, 'HT_LS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+exchange,512,336,6,2016,2528,2016,2277,STL,ensemble,0.9547,0.9285,,0.9637,0.342,,LT_HS,ensemble(SHARED+LT_HS),"{'SHARED': 0.5, 'LT_HS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"

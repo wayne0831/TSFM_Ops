@@ -1,0 +1,17 @@
+decomp_method,hl,regime_status,num_windows,share_within_hl_%,mean_LoRA_MAE,mean_Single_MAE,mean_Ensemble_MAE,mean_delta_Single_vs_LoRA,mean_delta_Ensemble_vs_LoRA,ensemble_win_rate_vs_LoRA_%
+STL,96,Regime Drift (Context != Target),699,71.3,0.1891,0.1945,0.1897,0.0054,0.0006,48.9
+STL,96,Regime Match (Context == Target),282,28.7,0.1957,0.1975,0.1948,0.0019,-0.0008,53.5
+STL,192,Regime Drift (Context != Target),325,66.1,0.228,0.2289,0.2257,0.0009,-0.0023,53.8
+STL,192,Regime Match (Context == Target),167,33.9,0.2243,0.2241,0.2226,-0.0002,-0.0018,53.3
+STL,336,Regime Drift (Context != Target),197,69.6,0.2535,0.2657,0.2566,0.0122,0.0031,51.8
+STL,336,Regime Match (Context == Target),86,30.4,0.2416,0.254,0.2446,0.0124,0.003,39.5
+STL,720,Regime Drift (Context != Target),97,72.9,0.2957,0.3083,0.299,0.0127,0.0033,42.3
+STL,720,Regime Match (Context == Target),36,27.1,0.2407,0.2669,0.2519,0.0262,0.0112,36.1
+STL_EMD,96,Regime Drift (Context != Target),782,79.7,0.1909,0.1965,0.191,0.0056,0.0001,48.5
+STL_EMD,96,Regime Match (Context == Target),199,20.3,0.1912,0.1982,0.193,0.007,0.0018,45.2
+STL_EMD,192,Regime Drift (Context != Target),396,80.5,0.2219,0.2269,0.2215,0.0051,-0.0004,48.5
+STL_EMD,192,Regime Match (Context == Target),96,19.5,0.2469,0.2617,0.252,0.0148,0.0051,41.7
+STL_EMD,336,Regime Drift (Context != Target),218,77.0,0.2361,0.2477,0.2384,0.0116,0.0023,49.1
+STL_EMD,336,Regime Match (Context == Target),65,23.0,0.2961,0.3144,0.3039,0.0183,0.0078,36.9
+STL_EMD,720,Regime Drift (Context != Target),104,78.2,0.2821,0.2995,0.2865,0.0174,0.0044,49.0
+STL_EMD,720,Regime Match (Context == Target),29,21.8,0.2761,0.2746,0.2742,-0.0015,-0.0019,48.3

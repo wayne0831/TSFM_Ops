@@ -11,14 +11,45 @@ try:
     from timesfm.timesfm_2p5.timesfm_2p5_torch import TimesFM_2p5_200M_torch  # noqa: E402
     from timesfm.torch import util as tfm_util  # noqa: E402
 except ImportError:
-    from timesfm_test.timesfm_2p5.timesfm_2p5_torch import TimesFM_2p5_200M_torch  # noqa: E402
-    from timesfm_test.torch import util as tfm_util  # noqa: E402
+    try:
+        from timesfm_test.timesfm_2p5.timesfm_2p5_torch import TimesFM_2p5_200M_torch  # noqa: E402
+        from timesfm_test.torch import util as tfm_util  # noqa: E402
+    except ImportError:
+        TimesFM_2p5_200M_torch = None
+        tfm_util = None
 
 from src.config import *
 
 _peft_common = PARAMS.get('PEFT', {}).get('common', {})
 BATCH = int(str(_peft_common.get('batch_size', '64')).split(',')[0].strip())
 STRIDE = int(str(_peft_common.get('stride', '32')).split(',')[0].strip())
+
+
+def _detect_tsfm_backend(model) -> str:
+    """
+    입력된 모델 객체로부터 TSFM 백엔드 종류('timesfm', 'chronos2', 'moirai2')를 판별합니다.
+    """
+    if hasattr(model, "stacked_xf"):
+        return "timesfm"
+
+    core_chronos = model.model if hasattr(model, "model") and hasattr(model.model, "encoder") else model
+    if hasattr(core_chronos, "chronos_config") and hasattr(core_chronos, "encoder") and hasattr(core_chronos.encoder, "block"):
+        return "chronos2"
+
+    core_moirai = model.module if hasattr(model, "module") and hasattr(model.module, "encoder") else model
+    if hasattr(core_moirai, "encoder") and hasattr(core_moirai.encoder, "layers"):
+        return "moirai2"
+
+    raise TypeError(f"지원하지 않는 TSFM 백본 모델입니다: {type(model)}")
+
+
+def _set_model_mode(model, training: bool):
+    """래퍼(Chronos2Pipeline, Moirai2Forecast 등) 또는 순수 nn.Module의 train/eval 모드를 안전하게 전환합니다."""
+    target = model.model if (not isinstance(model, nn.Module) and hasattr(model, "model")) else model
+    if training:
+        target.train()
+    else:
+        target.eval()
 
 
 def _lora_peft_parameters(adapters):
@@ -33,11 +64,12 @@ def save_peft_adapter(adapters, path):
 
 def train_peft_adapter(model, adapters, X, Y, epochs=100, bs=64, lr=1e-4, mixup_alpha=0.4, seed=0, log_every=50):
     """
-    TimesFM 모델에 장착된 LoRA 어댑터(A, B 행렬)만 효율적으로 미세조정(PEFT)하는 훈련 함수입니다.
-    
+    TSFM(TimesFM 2.5 / Chronos 2 / Moirai 2) 백본에 장착된 LoRA 어댑터(A, B 행렬)만
+    효율적으로 미세조정(PEFT)하는 통합 훈련 함수입니다.
+
     매개변수:
-      - model: 파인튜닝 대상이 되는 사전학습 TimesFM 백본 모델
-      - adapters: 모델의 선형 레이어(qkv_proj, out 등)에 부착된 LoRA 어댑터 객체 목록
+      - model: 파인튜닝 대상이 되는 사전학습 TSFM 백본 모델 (TimesFM, Chronos2Model, Moirai2Forecast 등)
+      - adapters: 모델의 선형 레이어에 부착된 LoRA 어댑터 객체 목록
       - X: stride 간격으로 생성된 입력 시계열 컨텍스트 데이터 (NumPy 배열, Shape: [N, cl])
       - Y: 예측 목표치(Ground Truth) 시계열 데이터 (NumPy 배열, Shape: [N, hl])
       - epochs: 전체 최적화 스텝 수 (기본값: 100)
@@ -47,35 +79,34 @@ def train_peft_adapter(model, adapters, X, Y, epochs=100, bs=64, lr=1e-4, mixup_
       - seed: 재현성을 위한 난수 시드 (기본값: 0)
       - log_every: 손실(Loss)을 터미널에 출력할 주기 (기본값: 50스텝마다 출력)
     """
+    backend = _detect_tsfm_backend(model)
+
     # 1. PyTorch 및 NumPy 연산의 재현성을 위해 시드 고정
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
-    
-    # 2. 최적화기(Optimizer) 설정:
-    # _lora_peft_parameters(adapters)를 통해 백본 가중치는 동결(Freeze)한 채, LoRA 어댑터의 A, B 행렬 파라미터만 Adam 옵티마이저에 전달
+
+    # 2. 최적화기(Optimizer) 설정: 백본 가중치는 동결한 채 LoRA 어댑터의 A, B 행렬만 최적화
     lora_params = _lora_peft_parameters(adapters)
     opt = torch.optim.Adam(lora_params, lr=lr)
-    
-    # 3. 모델을 학습 모드(Train Mode)로 전환 (Dropout 활성화 등)
-    model.train()
+
+    # 3. 모델을 학습 모드(Train Mode)로 전환
+    _set_model_mode(model, training=True)
     hl = Y.shape[1]
     eff_bs = min(int(bs), len(X))
 
     # 4. 지정된 epochs만큼 미니배치 샘플링 + Dynamic MixUp 기반 경사하강법 학습 루프 실행
     for epoch in range(1, epochs + 1):
-        # 5. 미니배치 무작위 샘플링 (Random Sub-sampling):
-        # 전체 학습 윈도우 개수 len(X) 중에서 eff_bs개만큼의 인덱스를 무작위 추출하여 GPU로 전송 (VRAM OOM 방지)
         idx = torch.randint(0, len(X), (eff_bs,)).numpy()
-        cx = torch.from_numpy(X[idx]).to(DEVICE)  # Shape: [eff_bs, cl] (Context Window)
-        ty = torch.from_numpy(Y[idx]).to(DEVICE)  # Shape: [eff_bs, hl] (Prediction Horizon Target)
+        cx = torch.from_numpy(X[idx]).to(DEVICE)  # Shape: [eff_bs, cl]
+        ty = torch.from_numpy(Y[idx]).to(DEVICE)  # Shape: [eff_bs, hl]
 
         # 데이터 스케일 왜곡 및 Gradient 폭발 방지를 위해 각 컨텍스트 시퀀스의 평균(mu), 표준편차(sigma)로 정규화
-        cx_mean = cx.mean(dim=1, keepdim=True)                      # Shape: [eff_bs, 1]
-        cx_std = torch.clamp(cx.std(dim=1, keepdim=True), min=1e-5) # Shape: [eff_bs, 1]
-        cx_norm = (cx - cx_mean) / cx_std                           # Shape: [eff_bs, cl]
-        ty_norm = (ty - cx_mean) / cx_std                           # Shape: [eff_bs, hl]
+        cx_mean = cx.mean(dim=1, keepdim=True)
+        cx_std = torch.clamp(cx.std(dim=1, keepdim=True), min=1e-5)
+        cx_norm = (cx - cx_mean) / cx_std
+        ty_norm = (ty - cx_mean) / cx_std
 
-        # 6. Dynamic MixUp 데이터 증강 적용 (배치 샘플이 2개 이상일 때 항상 적용)
+        # Dynamic MixUp 데이터 증강 적용 (배치 샘플이 2개 이상일 때 항상 적용)
         if eff_bs > 1:
             lam = float(rng.beta(mixup_alpha, mixup_alpha))
             perm = torch.randperm(eff_bs, device=DEVICE)
@@ -85,43 +116,44 @@ def train_peft_adapter(model, adapters, X, Y, epochs=100, bs=64, lr=1e-4, mixup_
             cx_in = cx_norm
             ty_target = ty_norm
 
-        # 7. 순전파(Forward Pass) 및 정규화 스케일 손실값(Normalized MSE Loss) 계산
-        pred = _predict_horizon(model, cx_in, hl)
-        loss = torch.mean((pred - ty_target) ** 2)
-        
-        # 7. 역전파(Backpropagation), 그래디언트 클리핑 및 파라미터 업데이트:
-        opt.zero_grad()  # 이전 스텝에서 누적된 기울기(Gradient) 초기화
-        loss.backward()   # 현재 배치의 손실에 대해 LoRA 파라미터들의 기울기 계산
-        torch.nn.utils.clip_grad_norm_(lora_params, max_norm=1.0)  # 그래디언트 폭발 방지를 위한 클리핑
-        opt.step()        # 계산된 기울기를 바탕으로 LoRA 어댑터 가중치(A, B) 갱신
-        
-        # 8. 주기적인 학습 로그 출력
+        # 백엔드별 미분 가능한 순전파 및 손실(Loss) 계산
+        if backend == "timesfm":
+            pred = _predict_horizon(model, cx_in, hl)
+            loss = torch.mean((pred - ty_target) ** 2)
+        elif backend == "chronos2":
+            loss = _compute_chronos2_loss(model, cx_in, ty_target)
+        elif backend == "moirai2":
+            loss = _compute_moirai2_loss(model, cx_in, ty_target)
+        else:
+            raise ValueError(f"알 수 없는 TSFM 백엔드입니다: {backend}")
+
+        # 역전파(Backpropagation), 그래디언트 클리핑 및 파라미터 업데이트
+        opt.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(lora_params, max_norm=1.0)
+        opt.step()
+
         if log_every and epoch % log_every == 0:
-            # flush=True로 터미널 버퍼링 없이 즉시 출력되도록 설정
             print(f"  epoch {epoch:>4} / {epochs}   loss {loss.item():.5f}", flush=True)
-            
-    # 9. 학습 완료 후 평가/추론 모드로 전환 (Dropout 비활성화, 결정론적 연산 유지)
-    model.eval()
+
+    # 학습 완료 후 평가/추론 모드로 전환
+    _set_model_mode(model, training=False)
 
 
+# =====================================================================
+# 1. TimesFM 2.5 전용 순전파 및 추론 헬퍼
+# =====================================================================
 def _prefill(model, ctx_t):
     """
     (B, cl) 크기의 시계열 텐서를 입력받아 TimesFM 백본을 거친 뒤,
     마지막 패치 위치에서 산출되는 (B, 128, 10) 분위수(Quantile) 예측치를 반환합니다.
-    (PyTorch Autograd 미분 그래프가 끊기지 않고 유지되어 LoRA 파인튜닝 시 역전파 가능)
-
-    동작 요약:
-      1. 시계열을 패치 단위(model.p = 32)로 분할
-      2. Welford 알고리즘 기반 Running Statistics(평균 mu, 표준편차 sg)를 패치 축을 따라 순차 계산
-      3. 누적 정규화(ReVIN) 적용 후 백본 모델 연산 수행
-      4. 모델 출력을 다시 원래 통계량(cmu, csg)으로 역정규화(De-normalization)
-      5. 최종 예측 구간(Horizon) 및 10개 분위수 차원 슬라이싱
     """
-    # 1. 배치 크기(Batch Size) 추출 (예: B)
+    if tfm_util is None:
+        raise ImportError("TimesFM 실행을 위해 'timesfm' 패키지가 필요합니다.")
+
     bsz, seq_len = ctx_t.shape
     p_size = model.p
 
-    # 컨텍스트 길이가 패치 크기(model.p)의 배수가 아닌 경우 좌측 패딩(Left Padding) 및 마스크 처리
     rem = seq_len % p_size
     if rem != 0:
         pad_len = p_size - rem
@@ -131,72 +163,32 @@ def _prefill(model, ctx_t):
         masks = torch.zeros_like(patched, dtype=torch.bool)
         masks[:, 0, :pad_len] = True
     else:
-        # 2. 1D 컨텍스트 시계열을 모델 패치 길이(model.p, 보통 32) 단위로 패치화(Patching)
-        # Shape: (B, 512) -> (B, num_patches, model.p)
-        # 512 길이 기준 model.p가 32이면 (B, 16, 32)가 됨
         patched = ctx_t.reshape(bsz, -1, p_size)
-
-        # 3. 마스크(Masks) 생성:
-        # 패딩이나 결측치가 없으므로 전부 유효 관측치(False)로 채운 bool 텐서 생성
-        # Shape: (B, num_patches, model.p)
         masks = torch.zeros_like(patched, dtype=torch.bool)
 
-    # 4. 인과적(Causal) 온라인 누적 정규화(Running Stats)를 위한 통계량 버퍼 초기화
-    # - n: 누적된 유효 데이터 수 (Shape: [B])
-    # - mu: 누적 평균 (Shape: [B])
-    # - sg: 누적 표준편차 (Shape: [B])
     n = torch.zeros(bsz, device=ctx_t.device)
     mu = torch.zeros(bsz, device=ctx_t.device)
     sg = torch.zeros(bsz, device=ctx_t.device)
 
-    # 각 패치 시점별로 누적된 평균과 표준편차를 저장할 리스트
     mus, sgs = [], []
-
-    # 5. 시간 축(패치 인덱스)을 따라 순차적으로 누적 통계량(Welford 방식) 업데이트
-    # 미래 정보가 과거 패치 통계량에 섞이지 않도록 인과적(Causal) 방식으로 계산함
     for i in range(patched.shape[1]):
-        # i번째 패치 patched[:, i] (Shape: [B, 32])를 반영하여 n, mu, sg를 갱신
         (n, mu, sg), _ = tfm_util.update_running_stats(
             n, mu, sg, patched[:, i], masks[:, i]
         )
-        mus.append(mu)  # 현재 패치 시점까지의 누적 평균 저장
-        sgs.append(sg)  # 현재 패치 시점까지의 누적 표준편차 저장
+        mus.append(mu)
+        sgs.append(sg)
 
-    # 리스트에 모인 통계량을 패치 차원(dim 1)으로 결합
-    # cmu, csg Shape: (B, num_patches, 1) 또는 (B, num_patches)
     cmu, csg = torch.stack(mus, 1), torch.stack(sgs, 1)
-
-    # 6. ReVIN 정규화 (Forward ReVIN):
-    # 각 패치를 해당 패치 시점의 누적 통계량(cmu, csg)으로 표준화 (y_norm = (y - cmu) / csg)
-    # Shape: (B, num_patches, model.p) -> (B, 16, 32)
     normed = tfm_util.revin(patched, cmu, csg, reverse=False)
-
-    # 7. TimesFM 모델 순전파 (Forward Pass):
-    # Transformer 백본 및 출력 헤드를 거쳐 은닉 상태와 예측 텐서(out_ts)를 산출
-    # out_ts Shape: (B, num_patches, model.o * model.q) 형태의 정규화된 출력
-    # (여기서 model.o: 예측 horizon 출력 길이=128, model.q: 분위수 개수=10)
     (_, _, out_ts, _), _ = model(normed, masks, None)
-
-    # 8. ReVIN 역정규화 (Reverse ReVIN):
-    # 모델의 정규화된 출력을 다시 원래 데이터의 스케일로 복원 (y_restored = y_norm * csg + cmu)
-    # Shape 유지: (B, num_patches, ...)
     restored = tfm_util.revin(out_ts, cmu, csg, reverse=True)
 
-    # 9. 최종 예측 차원 재구성(Reshape) 및 슬라이싱:
-    # - restored.reshape(bsz, -1, model.o, model.q):
-    #   텐서를 (배치 크기, 패치 수, 예측 스텝 수, j) = (B, 16, 128, 10) 형태로 변경
-    # - [:, -1]:
-    #   인과적 디코더(Causal Decoder) 구조상, '마지막 패치(Context의 끝)' 시점에서
-    #   미래를 향해 쏜 최종 128스텝 예측 헤드 값만 슬라이싱하여 추출
-    # 최종 반환 Shape: (B, 128, 10)
     return restored.reshape(bsz, -1, model.o, model.q)[:, -1]
 
 
 def _predict_horizon(model, ctx_t, hl=None):
     """
     _prefill을 활용하여 원하는 예측 길이(hl)만큼 포인트 예측치(Shape: [B, hl])를 반환합니다.
-    - hl <= model.o (128)인 경우: 1회 _prefill 수행 후 [:, :hl] 슬라이싱
-    - hl > model.o (128)인 경우 (예: 192, 256, 336, 720): model.o 단위로 자기회귀(Autoregressive) 연장 후 [:, :hl] 슬라이싱
     """
     if hl is None:
         hl = model.o
@@ -208,32 +200,292 @@ def _predict_horizon(model, ctx_t, hl=None):
     cur_ctx = ctx_t
     steps = math.ceil(hl / model.o)
     for _ in range(steps):
-        step_pred = _prefill(model, cur_ctx)[..., 0]  # Shape: (B, model.o)
+        step_pred = _prefill(model, cur_ctx)[..., 0]
         preds.append(step_pred)
         cur_ctx = torch.cat([cur_ctx, step_pred], dim=1)
 
     return torch.cat(preds, dim=1)[:, :hl]
 
 
+# =====================================================================
+# 2. Amazon Chronos 2 전용 순전파(Loss) 및 추론 헬퍼
+# =====================================================================
+def _get_chronos2_core(model):
+    return model.model if hasattr(model, "model") and hasattr(model.model, "chronos_config") else model
+
+
+def _get_chronos2_median_idx(core_model) -> int:
+    q_list = list(core_model.chronos_config.quantiles)
+    if 0.5 in q_list:
+        return q_list.index(0.5)
+    return int(np.argmin(np.abs(np.asarray(q_list, dtype=np.float64) - 0.5)))
+
+
+def _compute_chronos2_loss(model, cx_in: torch.Tensor, ty_target: torch.Tensor) -> torch.Tensor:
+    """
+    Chronos2Model의 내장 InstanceNorm(arcsinh 포함) 및 Multi-Quantile Pinball Loss를 사용하여
+    수치적으로 안정적이고 미분 그래프가 온전히 유지되는 손실값을 산출합니다.
+    """
+    core_model = _get_chronos2_core(model)
+    bsz, hl = ty_target.shape
+    out_patch = core_model.chronos_config.output_patch_size
+    max_patches = core_model.chronos_config.max_output_patches
+    max_step_hl = max_patches * out_patch
+    group_ids = torch.arange(bsz, dtype=torch.long, device=cx_in.device)
+
+    if hl <= max_step_hl:
+        num_patches = math.ceil(hl / out_patch)
+        out = core_model(
+            context=cx_in,
+            group_ids=group_ids,
+            num_output_patches=num_patches,
+            future_target=ty_target,
+        )
+        return out.loss
+
+    # 초장기 예측(hl > max_output_patches * output_patch_size) 시 청크 단위 누적 손실 계산
+    q50_idx = _get_chronos2_median_idx(core_model)
+    cur_ctx = cx_in
+    losses = []
+    offset = 0
+    while offset < hl:
+        step_hl = min(max_step_hl, hl - offset)
+        num_patches = math.ceil(step_hl / out_patch)
+        step_target = ty_target[:, offset : offset + step_hl]
+        out = core_model(
+            context=cur_ctx,
+            group_ids=group_ids,
+            num_output_patches=num_patches,
+            future_target=step_target,
+        )
+        losses.append(out.loss)
+        step_pred = out.quantile_preds[:, q50_idx, :step_hl]
+        cur_ctx = torch.cat([cur_ctx, step_pred], dim=1)[..., -core_model.chronos_config.context_length :]
+        offset += step_hl
+
+    return torch.stack(losses).mean()
+
+
+def _predict_horizon_chronos2(core_model, ctx_t: torch.Tensor, hl: int) -> torch.Tensor:
+    bsz = ctx_t.shape[0]
+    out_patch = core_model.chronos_config.output_patch_size
+    max_patches = core_model.chronos_config.max_output_patches
+    max_step_hl = max_patches * out_patch
+    q50_idx = _get_chronos2_median_idx(core_model)
+    group_ids = torch.arange(bsz, dtype=torch.long, device=ctx_t.device)
+
+    if hl <= max_step_hl:
+        num_patches = math.ceil(hl / out_patch)
+        out = core_model(
+            context=ctx_t,
+            group_ids=group_ids,
+            num_output_patches=num_patches,
+        )
+        return out.quantile_preds[:, q50_idx, :hl]
+
+    preds = []
+    cur_ctx = ctx_t
+    rem = hl
+    while rem > 0:
+        step_hl = min(max_step_hl, rem)
+        num_patches = math.ceil(step_hl / out_patch)
+        out = core_model(
+            context=cur_ctx,
+            group_ids=group_ids,
+            num_output_patches=num_patches,
+        )
+        step_pred = out.quantile_preds[:, q50_idx, :]
+        preds.append(step_pred)
+        cur_ctx = torch.cat([cur_ctx, step_pred], dim=1)[..., -core_model.chronos_config.context_length :]
+        rem -= step_pred.shape[-1]
+
+    return torch.cat(preds, dim=1)[:, :hl]
+
+
+def _forecast_chronos2(model, ctx: np.ndarray, hl: int, inf_batch_size: int = 64) -> np.ndarray:
+    core_model = _get_chronos2_core(model)
+    core_model.eval()
+    dev = next(core_model.parameters()).device
+    out_chunks = []
+    with torch.no_grad():
+        for start in range(0, len(ctx), inf_batch_size):
+            c_batch = torch.from_numpy(ctx[start : start + inf_batch_size]).to(device=dev, dtype=torch.float32)
+            pred_batch = _predict_horizon_chronos2(core_model, c_batch, hl=int(hl)).float().cpu().numpy()
+            out_chunks.append(pred_batch)
+    return np.concatenate(out_chunks, axis=0)
+
+
+# =====================================================================
+# 3. Salesforce Moirai 2 전용 순전파(Loss) 및 추론 헬퍼
+# =====================================================================
+def _ensure_moirai2_forecast_wrapper(model, cl: int, hl: int):
+    """
+    Moirai2Forecast 래퍼가 전달되면 그대로 활용하고, 순수 Moirai2Module이 전달되면
+    Moirai2Forecast 래퍼로 감싸서 반환합니다.
+    """
+    if hasattr(model, "_convert") and hasattr(model, "module"):
+        return model
+
+    from uni2ts.model.moirai2 import Moirai2Forecast
+
+    dev = next(model.parameters()).device
+    wrapper = Moirai2Forecast(
+        module=model,
+        prediction_length=int(hl),
+        context_length=int(cl),
+        target_dim=1,
+        feat_dynamic_real_dim=0,
+        past_feat_dynamic_real_dim=0,
+    )
+    wrapper.to(dev)
+    return wrapper
+
+
+def _compute_moirai2_loss(model, cx_in: torch.Tensor, ty_target: torch.Tensor) -> torch.Tensor:
+    """
+    Moirai-2의 Causal Multi-Token Quantile 예측 구조(training_mode=True)를 그대로 활용하여,
+    인과적 마스크(미래 누수 차단) 및 컨텍스트 전용 스케일러(PackedStdScaler) 하에서
+    전체 미래 패치 및 다중 토큰 헤드(num_predict_token), 전체 분위수(quantile_levels)에 대한
+    미분 가능한 Pinball Quantile Loss를 1회 순전파로 계산합니다.
+    """
+    from einops import rearrange
+
+    bsz, cl = cx_in.shape
+    hl = ty_target.shape[1]
+    forecast_model = _ensure_moirai2_forecast_wrapper(model, cl=cl, hl=hl)
+    core_module = forecast_model.module
+    patch_size = core_module.patch_size
+    num_pred_tok = core_module.num_predict_token
+    num_quantiles = core_module.num_quantiles
+
+    past_target = cx_in.unsqueeze(-1)
+    past_observed = torch.ones_like(past_target, dtype=torch.bool)
+    past_is_pad = torch.zeros((bsz, cl), dtype=torch.bool, device=cx_in.device)
+
+    future_target = ty_target.unsqueeze(-1)
+    future_observed = torch.ones_like(future_target, dtype=torch.bool)
+    future_is_pad = torch.zeros((bsz, hl), dtype=torch.long, device=cx_in.device)
+
+    with forecast_model.hparams_context(prediction_length=hl, context_length=cl):
+        (
+            target,
+            observed_mask,
+            sample_id,
+            time_id,
+            variate_id,
+            prediction_mask,
+        ) = forecast_model._convert(
+            patch_size,
+            past_target,
+            past_observed,
+            past_is_pad,
+            future_target=future_target,
+            future_observed_target=future_observed,
+            future_is_pad=future_is_pad,
+        )
+        n_ctx = forecast_model.context_token_length(patch_size)
+        n_fut = forecast_model.prediction_token_length(patch_size)
+
+    preds, scaled_target = core_module(
+        target,
+        observed_mask,
+        sample_id,
+        time_id,
+        variate_id,
+        prediction_mask,
+        training_mode=True,
+    )
+
+    preds = rearrange(
+        preds,
+        "b s (k q p) -> b s k q p",
+        k=num_pred_tok,
+        q=num_quantiles,
+        p=patch_size,
+    )
+    q_levels = torch.tensor(
+        core_module.quantile_levels,
+        device=preds.device,
+        dtype=preds.dtype,
+    ).view(1, 1, num_quantiles, 1)
+
+    step_losses = []
+    max_k = min(num_pred_tok, n_fut)
+    for k in range(max_k):
+        t_start = n_ctx - 1
+        t_end = n_ctx + n_fut - 1 - k
+        pred_k = preds[:, t_start:t_end, k, :, :]                       # (B, n_fut - k, Q, P)
+        tgt_k = scaled_target[:, n_ctx + k : n_ctx + n_fut, None, :]    # (B, n_fut - k, 1, P)
+        mask_k = observed_mask[:, n_ctx + k : n_ctx + n_fut, None, :].to(preds.dtype)
+
+        err = tgt_k - pred_k
+        pinball = 2.0 * torch.maximum(q_levels * err, (q_levels - 1.0) * err) * mask_k
+        denom = torch.clamp(mask_k.sum(), min=1.0)
+        # 분위수 차원 합산 후 유효 타임스텝 평균
+        step_losses.append(pinball.sum(dim=2).sum() / denom)
+
+    return torch.stack(step_losses).mean()
+
+
+def _forecast_moirai2(model, ctx: np.ndarray, hl: int, inf_batch_size: int = 32) -> np.ndarray:
+    cl = ctx.shape[1]
+    hl = int(hl)
+    forecast_model = _ensure_moirai2_forecast_wrapper(model, cl=cl, hl=hl)
+    forecast_model.eval()
+    forecast_model.module.eval()
+
+    dev = next(forecast_model.module.parameters()).device
+    forecast_model.to(dev)
+
+    q_list = list(forecast_model.module.quantile_levels)
+    q50_idx = q_list.index(0.5) if 0.5 in q_list else int(np.argmin(np.abs(np.asarray(q_list) - 0.5)))
+
+    out_chunks = []
+    with torch.no_grad(), forecast_model.hparams_context(prediction_length=hl, context_length=cl):
+        for start in range(0, len(ctx), inf_batch_size):
+            c_np = ctx[start : start + inf_batch_size]
+            bsz = len(c_np)
+            past_target = torch.from_numpy(c_np).to(device=dev, dtype=torch.float32).unsqueeze(-1)
+            past_observed = ~torch.isnan(past_target)
+            past_is_pad = torch.zeros((bsz, cl), dtype=torch.bool, device=dev)
+
+            q_preds = forecast_model(
+                past_target=past_target,
+                past_observed_target=past_observed,
+                past_is_pad=past_is_pad,
+            )  # Shape: (bsz, num_quantiles, hl)
+            out_chunks.append(q_preds[:, q50_idx, :hl].float().cpu().numpy())
+
+    return np.concatenate(out_chunks, axis=0)
+
+
+# =====================================================================
+# 4. 공통 예측(Forecast), 윈도우 생성 및 성능 지표 계산 함수
+# =====================================================================
 def forecast(model, ctx, hl=None):
     """
     (N, cl) 크기의 테스트 시계열 컨텍스트 전체(ctx)를 입력받아,
     (N, hl) 크기의 최종 포인트 예측 NumPy 배열을 반환합니다.
-    (평가 및 테스트 전용 함수로, torch.no_grad() 하에서 전체 테스트 시퀀스를 한 번에 예측합니다.)
-
-    매개변수:
-      - model: 사전학습 백본 또는 LoRA가 결합된 TimesFM 모델 (tsfm.model)
-      - ctx: 입력 시계열 컨텍스트 데이터 (NumPy ndarray, Shape: [N, cl])
-      - hl: 예측할 미래 스텝 수 (기본값: None이면 model.o=128 사용)
-
-    반환값:
-      - (N, hl) 형태의 미래 예측 NumPy ndarray
+    TimesFM 2.5 / Chronos 2 / Moirai 2 백본을 모두 지원합니다.
     """
-    model.eval()
-    with torch.no_grad():
-        c = torch.from_numpy(ctx).to(DEVICE)
-        out = _predict_horizon(model, c, hl=hl).float().cpu().numpy()
-    return out
+    backend = _detect_tsfm_backend(model)
+    if backend == "timesfm":
+        model.eval()
+        with torch.no_grad():
+            c = torch.from_numpy(ctx).to(DEVICE)
+            out = _predict_horizon(model, c, hl=hl).float().cpu().numpy()
+        return out
+    elif backend == "chronos2":
+        if hl is None:
+            core = _get_chronos2_core(model)
+            hl = core.chronos_config.max_output_patches * core.chronos_config.output_patch_size
+        return _forecast_chronos2(model, ctx, hl=int(hl))
+    elif backend == "moirai2":
+        if hl is None:
+            hl = int(getattr(getattr(model, "hparams", None), "prediction_length", 96))
+        return _forecast_moirai2(model, ctx, hl=int(hl))
+    else:
+        raise ValueError(f"알 수 없는 TSFM 백엔드입니다: {backend}")
 
 
 def create_sliding_windows(data, cl, hl, stride=None):
@@ -261,7 +513,7 @@ def create_sliding_windows(data, cl, hl, stride=None):
 def forecast_test_series(model, data, cl, hl):
     """
     1D 테스트 시계열 데이터(data, 앞부분 cl 길이의 컨텍스트 포함)에 대해
-    hl 간격으로 컨텍스트 윈도우를 구성하고, _prefill 기반 forecast 함수를 통해
+    hl 간격으로 컨텍스트 윈도우를 구성하고, 통합 forecast 함수를 통해
     전체 테스트 구간의 예측치(predictions)와 실제값(actuals)을 반환합니다.
     """
     cl, hl = int(cl), int(hl)

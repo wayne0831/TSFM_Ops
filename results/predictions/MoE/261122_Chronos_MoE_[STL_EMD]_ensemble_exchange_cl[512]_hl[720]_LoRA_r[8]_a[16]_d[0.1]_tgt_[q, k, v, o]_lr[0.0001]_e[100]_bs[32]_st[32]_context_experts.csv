@@ -1,0 +1,5 @@
+data,cl,hl,window_idx,context_start_idx,context_end_idx,pred_start_idx,pred_end_idx,decomp_method,inference_method,F_T,F_S,F_I,theta_T,theta_S,theta_I,assigned_sector,called_expert,expert_weights,target_modules
+exchange,512,720,0,0,512,0,720,STL_EMD,ensemble,0.9808,0.1797,0.7494,0.9706,0.59,0.3794,HT_LS_HI,ensemble(SHARED+HT_LS_HI),"{'SHARED': 0.5, 'HT_LS_HI': 0.5}","['q', 'k', 'v', 'o']"
+exchange,512,720,1,720,1232,720,1440,STL_EMD,ensemble,0.8451,0.9543,0.0,0.9706,0.59,0.3794,LT_HS_LI,ensemble(SHARED+LT_HS_LI),"{'SHARED': 0.5, 'LT_HS_LI': 0.5}","['q', 'k', 'v', 'o']"
+exchange,512,720,2,1440,1952,1440,2160,STL_EMD,ensemble,0.4267,0.9922,0.0,0.9706,0.59,0.3794,LT_HS_LI,ensemble(SHARED+LT_HS_LI),"{'SHARED': 0.5, 'LT_HS_LI': 0.5}","['q', 'k', 'v', 'o']"
+exchange,512,720,3,2160,2672,2160,2277,STL_EMD,ensemble,0.987,0.6238,0.7991,0.9706,0.59,0.3794,HT_HS_HI,ensemble(SHARED+HT_HS_HI),"{'SHARED': 0.5, 'HT_HS_HI': 0.5}","['q', 'k', 'v', 'o']"

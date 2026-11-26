@@ -1,0 +1,8 @@
+data,cl,hl,window_idx,context_start_idx,context_end_idx,pred_start_idx,pred_end_idx,decomp_method,inference_method,F_T,F_S,F_I,theta_T,theta_S,theta_I,assigned_sector,called_expert,expert_weights,target_modules
+exchange,512,336,0,0,512,0,336,STL_EMD,single,0.9808,0.1797,0.7494,0.9796,0.5841,0.4249,HT_LS_HI,HT_LS_HI,{'HT_LS_HI': 1.0},"['q', 'k', 'v', 'o']"
+exchange,512,336,1,336,848,336,672,STL_EMD,single,0.9865,0.8621,0.0,0.9796,0.5841,0.4249,HT_HS_LI,HT_HS_LI,{'HT_HS_LI': 1.0},"['q', 'k', 'v', 'o']"
+exchange,512,336,2,672,1184,672,1008,STL_EMD,single,0.986,0.5675,0.9057,0.9796,0.5841,0.4249,HT_LS_HI,HT_LS_HI,{'HT_LS_HI': 1.0},"['q', 'k', 'v', 'o']"
+exchange,512,336,3,1008,1520,1008,1344,STL_EMD,single,0.9817,0.6017,0.8317,0.9796,0.5841,0.4249,HT_HS_HI,HT_HS_HI,{'HT_HS_HI': 1.0},"['q', 'k', 'v', 'o']"
+exchange,512,336,4,1344,1856,1344,1680,STL_EMD,single,0.6553,0.4397,0.0,0.9796,0.5841,0.4249,LT_LS_LI,LT_LS_LI,{'LT_LS_LI': 1.0},"['q', 'k', 'v', 'o']"
+exchange,512,336,5,1680,2192,1680,2016,STL_EMD,single,0.9975,0.5891,0.8428,0.9796,0.5841,0.4249,HT_HS_HI,HT_HS_HI,{'HT_HS_HI': 1.0},"['q', 'k', 'v', 'o']"
+exchange,512,336,6,2016,2528,2016,2277,STL_EMD,single,0.8557,0.8119,0.0,0.9796,0.5841,0.4249,LT_HS_LI,LT_HS_LI,{'LT_HS_LI': 1.0},"['q', 'k', 'v', 'o']"

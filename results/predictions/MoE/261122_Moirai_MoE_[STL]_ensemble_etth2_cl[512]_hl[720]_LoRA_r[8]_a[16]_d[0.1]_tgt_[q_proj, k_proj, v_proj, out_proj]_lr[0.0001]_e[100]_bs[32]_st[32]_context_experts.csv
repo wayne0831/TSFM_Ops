@@ -1,0 +1,9 @@
+data,cl,hl,window_idx,context_start_idx,context_end_idx,pred_start_idx,pred_end_idx,decomp_method,inference_method,F_T,F_S,F_I,theta_T,theta_S,theta_I,assigned_sector,called_expert,expert_weights,target_modules
+etth2,512,720,0,0,512,0,720,STL,ensemble,0.6441,0.6149,,0.6765,0.7064,,LT_LS,ensemble(SHARED+LT_LS),"{'SHARED': 0.5, 'LT_LS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+etth2,512,720,1,720,1232,720,1440,STL,ensemble,0.6243,0.8438,,0.6765,0.7064,,LT_HS,ensemble(SHARED+LT_HS),"{'SHARED': 0.5, 'LT_HS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+etth2,512,720,2,1440,1952,1440,2160,STL,ensemble,0.807,0.6711,,0.6765,0.7064,,HT_LS,ensemble(SHARED+HT_LS),"{'SHARED': 0.5, 'HT_LS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+etth2,512,720,3,2160,2672,2160,2880,STL,ensemble,0.7669,0.7649,,0.6765,0.7064,,HT_HS,ensemble(SHARED+HT_HS),"{'SHARED': 0.5, 'HT_HS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+etth2,512,720,4,2880,3392,2880,3600,STL,ensemble,0.575,0.8938,,0.6765,0.7064,,LT_HS,ensemble(SHARED+LT_HS),"{'SHARED': 0.5, 'LT_HS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+etth2,512,720,5,3600,4112,3600,4320,STL,ensemble,0.655,0.9923,,0.6765,0.7064,,LT_HS,ensemble(SHARED+LT_HS),"{'SHARED': 0.5, 'LT_HS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+etth2,512,720,6,4320,4832,4320,5040,STL,ensemble,0.7435,0.6481,,0.6765,0.7064,,HT_LS,ensemble(SHARED+HT_LS),"{'SHARED': 0.5, 'HT_LS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"
+etth2,512,720,7,5040,5552,5040,5226,STL,ensemble,0.6698,0.7772,,0.6765,0.7064,,LT_HS,ensemble(SHARED+LT_HS),"{'SHARED': 0.5, 'LT_HS': 0.5}","['q_proj', 'k_proj', 'v_proj', 'out_proj']"

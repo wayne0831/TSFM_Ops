@@ -1,4 +1,4 @@
-`###########################################################################################################
+###########################################################################################################
 # import libraries
 ###########################################################################################################
 import argparse
@@ -55,11 +55,16 @@ def load_test_actuals(data_name: str, ft_ratio: Optional[float] = None) -> np.nd
     if cache_key in _ACTUALS_CACHE:
         return _ACTUALS_CACHE[cache_key]
 
-    if data_name not in DATA_PATH:
-        raise KeyError(f"DATA_PATH에서 데이터셋 '{data_name}'을(를) 찾을 수 없습니다.")
+    resolved_data_name = data_name
+    if resolved_data_name not in DATA_PATH:
+        lower_map = {k.lower(): k for k in DATA_PATH.keys()}
+        if resolved_data_name.lower() in lower_map:
+            resolved_data_name = lower_map[resolved_data_name.lower()]
+        else:
+            raise KeyError(f"DATA_PATH에서 데이터셋 '{data_name}'을(를) 찾을 수 없습니다.")
 
-    df_path = _resolve_path(DATA_PATH[data_name])
-    tgt_col = DATASET[data_name]['target_col']
+    df_path = _resolve_path(DATA_PATH[resolved_data_name])
+    tgt_col = DATASET[resolved_data_name]['target_col']
     df_raw = pd.read_csv(df_path)
 
     target = df_raw[tgt_col].fillna(0).values.astype(np.float32)
@@ -74,39 +79,51 @@ def load_test_actuals(data_name: str, ft_ratio: Optional[float] = None) -> np.nd
 # filename parser for .npy prediction files
 ###########################################################################################################
 
-# 1. MoE 패턴:
-# TimesFM_MoE_[STL_EMD]_single_Etth1_cl[512]_hl[64]_LoRA_r[8]_a[16]_d[0.1]_tgt_[qkv_proj, out]_lr[0.0001]_e[100]_bs[32]_st[32]_preds_261104.npy
+# 파일명에서 날짜({DATE})와 본문(body) 분리:
+#   - 신규 형식: {DATE}_{body}_preds.npy
+#   - 기존 형식: {body}_preds_{DATE}.npy
+_PREDS_PREFIX_DATE = re.compile(r"^(?P<date>\d+)_(?P<body>.+?)_preds\.npy$")
+_PREDS_SUFFIX_DATE = re.compile(r"^(?P<body>.+?)_preds_(?P<date>\d+)\.npy$")
+
+# 1. MoE 본문 패턴:
+# TimesFM_MoE_[STL_EMD]_single_etth1_cl[512]_hl[64]_LoRA_r[8]_a[16]_d[0.1]_tgt_[qkv_proj, out]_lr[0.0001]_e[100]_bs[32]_st[32]
 _MOE_PATTERN = re.compile(
-    r"^(?P<tsfm>[^_]+)_MoE_\[(?P<decomp>[^\]]+)\]_(?P<inf_m>single|weighted)_(?P<data>[^_]+)"
+    r"^(?P<tsfm>[^_]+)_MoE_\[(?P<decomp>[^\]]+)\]_(?P<inf_m>single|weighted|ensemble)_(?P<data>[^_]+)"
     r"_cl\[(?P<cl>\d+)\]_hl\[(?P<hl>\d+)\]_(?P<ft>[^_]+)"
     r"_r\[(?P<rank>\d+)\]_a\[(?P<alpha>\d+)\]_d\[(?P<dropout>[^\]]+)\]"
     r"_tgt_\[(?P<tgt>[^\]]+)\]_lr\[(?P<lr>[^\]]+)\]_e\[(?P<epochs>\d+)\]_bs\[(?P<bs>\d+)\]"
-    r"(?:_st\[(?P<stride>\d+)\])?_preds_(?P<date>\d+)\.npy$"
+    r"(?:_st\[(?P<stride>\d+)\])?$"
 )
 
-# 2. LoRA 패턴:
-# TimesFM_Etth1_cl[512]_hl[64]_LoRA_r[8]_a[16]_d[0.1]_tgt_[qkv_proj, out]_lr[0.0001]_e[100]_bs[32]_st[32]_preds_261104.npy
+# 2. LoRA 본문 패턴:
+# TimesFM_etth1_cl[512]_hl[64]_LoRA_r[8]_a[16]_d[0.1]_tgt_[qkv_proj, out]_lr[0.0001]_e[100]_bs[32]_st[32]
 _LORA_PATTERN = re.compile(
     r"^(?P<tsfm>[^_]+)_(?P<data>[^_]+)_cl\[(?P<cl>\d+)\]_hl\[(?P<hl>\d+)\]_(?P<ft>[^_]+)"
     r"_r\[(?P<rank>\d+)\]_a\[(?P<alpha>\d+)\]_d\[(?P<dropout>[^\]]+)\]"
     r"_tgt_\[(?P<tgt>[^\]]+)\]_lr\[(?P<lr>[^\]]+)\]_e\[(?P<epochs>\d+)\]_bs\[(?P<bs>\d+)\]"
-    r"(?:_st\[(?P<stride>\d+)\])?_preds_(?P<date>\d+)\.npy$"
+    r"(?:_st\[(?P<stride>\d+)\])?$"
 )
 
-# 3. TimesFM 단독 패턴:
-# TimesFM_Etth1_cl[512]_hl[64]_preds_261104.npy
+# 3. TimesFM 단독 본문 패턴:
+# TimesFM_etth1_cl[512]_hl[64]
 _TSFM_PATTERN = re.compile(
-    r"^(?P<tsfm>[^_]+)_(?P<data>[^_]+)_cl\[(?P<cl>\d+)\]_hl\[(?P<hl>\d+)\]_preds_(?P<date>\d+)\.npy$"
+    r"^(?P<tsfm>[^_]+)_(?P<data>[^_]+)_cl\[(?P<cl>\d+)\]_hl\[(?P<hl>\d+)\]$"
 )
 
 
 def parse_prediction_filename(npy_path: str) -> Optional[Dict[str, Any]]:
     """
     예측 .npy 파일 경로에서 모델 종류, 데이터셋, cl, hl, 하이퍼파라미터 등의 메타데이터를 파싱합니다.
+    신규 형식('{DATE}_..._preds.npy')과 기존 형식('..._preds_{DATE}.npy')을 모두 지원합니다.
     """
     fname = os.path.basename(npy_path)
+    m_date = _PREDS_PREFIX_DATE.match(fname) or _PREDS_SUFFIX_DATE.match(fname)
+    if not m_date:
+        return None
+    date_str = m_date.group('date')
+    body = m_date.group('body')
 
-    m_moe = _MOE_PATTERN.match(fname)
+    m_moe = _MOE_PATTERN.match(body)
     if m_moe:
         d = m_moe.groupdict()
         return {
@@ -129,11 +146,11 @@ def parse_prediction_filename(npy_path: str) -> Optional[Dict[str, Any]]:
             'epochs': int(d['epochs']),
             'batch_size': int(d['bs']),
             'stride': int(d['stride']) if d.get('stride') else 32,
-            'date': d['date'],
+            'date': date_str,
             'label': f"{d['tsfm']}-MoE ({d['decomp']}, {d['inf_m']})",
         }
 
-    m_lora = _LORA_PATTERN.match(fname)
+    m_lora = _LORA_PATTERN.match(body)
     if m_lora:
         d = m_lora.groupdict()
         return {
@@ -156,15 +173,15 @@ def parse_prediction_filename(npy_path: str) -> Optional[Dict[str, Any]]:
             'epochs': int(d['epochs']),
             'batch_size': int(d['bs']),
             'stride': int(d['stride']) if d.get('stride') else 32,
-            'date': d['date'],
+            'date': date_str,
             'label': f"{d['tsfm']}+{d['ft']} (tgt=[{d['tgt']}])",
         }
 
-    m_tsfm = _TSFM_PATTERN.match(fname)
+    m_tsfm = _TSFM_PATTERN.match(body)
     if m_tsfm:
         d = m_tsfm.groupdict()
         return {
-            'category': 'TimesFM',
+            'category': 'Base',
             'path': npy_path,
             'filename': fname,
             'stem': os.path.splitext(fname)[0],
@@ -183,8 +200,8 @@ def parse_prediction_filename(npy_path: str) -> Optional[Dict[str, Any]]:
             'epochs': None,
             'batch_size': None,
             'stride': None,
-            'date': d['date'],
-            'label': f"{d['tsfm']} (Zero-shot)",
+            'date': date_str,
+            'label': f"{d['tsfm']} (Base)",
         }
 
     return None
@@ -192,8 +209,13 @@ def parse_prediction_filename(npy_path: str) -> Optional[Dict[str, Any]]:
 
 def _find_matching_context_experts_csv(npy_path: str) -> Optional[str]:
     """
-    MoE 예측 .npy 파일과 짝을 이루는 _context_experts_{DATE}.csv 파일이 존재하면 그 경로를 반환합니다.
+    MoE 예측 .npy 파일과 짝을 이루는 context_experts CSV 파일이 존재하면 그 경로를 반환합니다.
+    신규 형식('{DATE}_..._context_experts.csv')과 기존 형식('..._context_experts_{DATE}.csv')을 모두 지원합니다.
     """
+    if npy_path.endswith("_preds.npy"):
+        candidate = npy_path[: -len("_preds.npy")] + "_context_experts.csv"
+        if os.path.isfile(candidate):
+            return candidate
     candidate = re.sub(r"_preds_(\d+)\.npy$", r"_context_experts_\1.csv", npy_path)
     if candidate != npy_path and os.path.isfile(candidate):
         return candidate
@@ -226,7 +248,7 @@ def plot_single_prediction(
     actuals = actuals[:min_len]
     preds = preds[:min_len]
 
-    mae, mse, wape, smape = calculate_metrics(actuals, preds)
+    mae, mse, wape, smape, *_ = calculate_metrics(actuals, preds)
     hl = meta['hl']
     if zoom_steps is None:
         zoom_steps = min(min_len, max(hl * 4, 256))
@@ -312,11 +334,12 @@ def plot_single_prediction(
         ax_ctx.grid(True, linestyle=":", alpha=0.5)
 
     if save_dir is None:
-        cat_key = meta['category']
+        cat_key = meta['tsfm_method'] if meta['category'] == 'Base' else meta['category']
         save_dir = _resolve_path(RES_PATH['plot'].get(cat_key, f"./results/plot/{cat_key}/"))
     os.makedirs(save_dir, exist_ok=True)
 
-    out_png_path = os.path.join(save_dir, f"{meta['stem']}.png")
+    out_stem = meta['stem'] if meta['stem'].startswith(f"{meta['date']}_") else f"{meta['date']}_{meta['stem']}"
+    out_png_path = os.path.join(save_dir, f"{out_stem}.png")
     fig.savefig(out_png_path, dpi=180)
     plt.close(fig)
     return out_png_path
@@ -333,14 +356,14 @@ def plot_baseline_comparisons(
     """
     saved_paths: List[str] = []
 
-    # (data_name, cl, hl, date) 별로 파일 분류
-    by_setting: Dict[Tuple[str, int, int, str], List[Dict[str, Any]]] = defaultdict(list)
+    # (tsfm_method, data_name, cl, hl, date) 별로 파일 분류
+    by_setting: Dict[Tuple[str, str, int, int, str], List[Dict[str, Any]]] = defaultdict(list)
     for item in parsed_items:
-        key = (item['data_name'], item['cl'], item['hl'], item['date'])
+        key = (item['tsfm_method'], item['data_name'], item['cl'], item['hl'], item['date'])
         by_setting[key].append(item)
 
-    for (data_name, cl, hl, date_str), group in by_setting.items():
-        tsfm_items = [x for x in group if x['category'] == 'TimesFM']
+    for (tsfm_method, data_name, cl, hl, date_str), group in by_setting.items():
+        tsfm_items = [x for x in group if x['category'] not in ('LoRA', 'MoE')]
         lora_items = [x for x in group if x['category'] == 'LoRA']
         moe_items = [x for x in group if x['category'] == 'MoE']
 
@@ -380,8 +403,8 @@ def plot_baseline_comparisons(
             updated_series = []
             for lbl, arr, cand, _ in loaded_series:
                 arr_cut = arr[:min_len]
-                metrics = calculate_metrics(actuals, arr_cut)
-                updated_series.append((lbl, arr_cut, cand, metrics))
+                mae, mse, wape, smape, *_ = calculate_metrics(actuals, arr_cut)
+                updated_series.append((lbl, arr_cut, cand, (mae, mse, wape, smape)))
 
             eff_zoom = zoom_steps if zoom_steps is not None else min(min_len, max(hl * 4, 256))
             z_start = max(0, min_len - eff_zoom)
@@ -402,7 +425,7 @@ def plot_baseline_comparisons(
 
             for idx_s, (lbl, arr_cut, cand, (mae, mse, wape, smape)) in enumerate(updated_series):
                 color = palette[idx_s % len(palette)]
-                line_style = "--" if cand['category'] == 'TimesFM' else ("-." if cand['category'] == 'LoRA' else "-")
+                line_style = "--" if cand['category'] not in ('LoRA', 'MoE') else ("-." if cand['category'] == 'LoRA' else "-")
                 legend_lbl = f"{lbl} (MAE={mae:.4f}, MSE={mse:.4f})"
 
                 ax_full.plot(t_full, arr_cut, label=legend_lbl, color=color, linewidth=1.2, linestyle=line_style, alpha=0.85)
@@ -410,7 +433,7 @@ def plot_baseline_comparisons(
 
             tgt_suffix = f" | tgt=[{tgt_mod}]" if tgt_mod else ""
             ax_full.set_title(
-                f"[Model Comparison - {data_name}] Full Test Series (cl={cl}, hl={hl}{tgt_suffix}, date={date_str})",
+                f"[{tsfm_method} Comparison - {data_name}] Full Test Series (cl={cl}, hl={hl}{tgt_suffix}, date={date_str})",
                 fontsize=12,
                 fontweight="bold",
             )
@@ -424,7 +447,7 @@ def plot_baseline_comparisons(
                 ax_zoom.axvline(x=b_idx, color="#9ca3af", linestyle="--", linewidth=0.7, alpha=0.6)
 
             ax_zoom.set_title(
-                f"[Model Comparison - {data_name}] Zoom-in View (Steps [{z_start}:{min_len}], Vertical dashed lines = hl={hl} boundaries)",
+                f"[{tsfm_method} Comparison - {data_name}] Zoom-in View (Steps [{z_start}:{min_len}], Vertical dashed lines = hl={hl} boundaries)",
                 fontsize=11,
                 fontweight="bold",
             )
@@ -437,7 +460,7 @@ def plot_baseline_comparisons(
             os.makedirs(out_dir, exist_ok=True)
 
             tgt_tag = f"_tgt_[{tgt_mod}]" if tgt_mod else ""
-            out_name = f"Comparison_{data_name}_cl[{cl}]_hl[{hl}]{tgt_tag}_{date_str}.png"
+            out_name = f"{date_str}_{tsfm_method}_Comparison_{data_name}_cl[{cl}]_hl[{hl}]{tgt_tag}.png"
             out_path = os.path.join(out_dir, out_name)
             fig.savefig(out_path, dpi=180)
             plt.close(fig)
